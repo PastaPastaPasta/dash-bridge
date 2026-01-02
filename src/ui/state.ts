@@ -1,6 +1,7 @@
 import type {
   BridgeState,
   BridgeStep,
+  BridgeMode,
   KeyPair,
   UTXO,
   IdentityKeyConfig,
@@ -12,16 +13,15 @@ import {
 import { generateNewMnemonic } from '../crypto/hd.js';
 
 /**
- * Create initial bridge state with HD-derived keys
+ * Create initial bridge state (mode selection)
+ * Keys are generated when mode is selected, not at init
  */
 export function createInitialState(network: 'testnet' | 'mainnet'): BridgeState {
-  const mnemonic = generateNewMnemonic(128); // 12-word mnemonic
-
   return {
     step: 'init',
     network,
-    mnemonic,
-    identityKeys: generateDefaultIdentityKeysHD(network, mnemonic),
+    mode: 'create', // Default mode
+    identityKeys: [],
   };
 }
 
@@ -42,6 +42,74 @@ export function setKeyPairs(
     step: 'awaiting_deposit',
     assetLockKeyPair,
     depositAddress,
+  };
+}
+
+/**
+ * Set bridge mode and transition to appropriate initial step
+ */
+export function setMode(state: BridgeState, mode: BridgeMode): BridgeState {
+  if (mode === 'create') {
+    // Create mode: generate mnemonic and identity keys
+    const mnemonic = generateNewMnemonic(128);
+    return {
+      ...state,
+      step: 'configure_keys',
+      mode,
+      mnemonic,
+      identityKeys: generateDefaultIdentityKeysHD(state.network, mnemonic),
+      // Clear any top-up state
+      targetIdentityId: undefined,
+      isOneTimeKey: undefined,
+    };
+  } else {
+    // Top-up mode: no mnemonic, no identity keys
+    return {
+      ...state,
+      step: 'enter_identity',
+      mode,
+      mnemonic: undefined,
+      identityKeys: [],
+      isOneTimeKey: true,
+    };
+  }
+}
+
+/**
+ * Set target identity ID for top-up
+ */
+export function setTargetIdentityId(state: BridgeState, targetIdentityId: string): BridgeState {
+  return {
+    ...state,
+    targetIdentityId,
+  };
+}
+
+/**
+ * Set one-time key pair for top-up (random, not HD-derived)
+ */
+export function setOneTimeKeyPair(
+  state: BridgeState,
+  assetLockKeyPair: KeyPair,
+  depositAddress: string
+): BridgeState {
+  return {
+    ...state,
+    step: 'awaiting_deposit',
+    assetLockKeyPair,
+    depositAddress,
+    isOneTimeKey: true,
+  };
+}
+
+/**
+ * Set top-up complete
+ */
+export function setTopUpComplete(state: BridgeState): BridgeState {
+  return {
+    ...state,
+    step: 'complete',
+    identityId: state.targetIdentityId, // Use target identity ID on completion
   };
 }
 
@@ -272,6 +340,7 @@ export function getStepDescription(step: BridgeStep): string {
   const descriptions: Record<BridgeStep, string> = {
     init: 'Ready to start',
     configure_keys: 'Configure your keys',
+    enter_identity: 'Top up identity',
     generating_keys: 'Setting up...',
     awaiting_deposit: 'Fund your identity',
     detecting_deposit: 'Fund your identity',
@@ -280,7 +349,8 @@ export function getStepDescription(step: BridgeStep): string {
     broadcasting: 'Submitting to network...',
     waiting_islock: 'Confirming...',
     registering_identity: 'Creating identity...',
-    complete: 'Save your keys',
+    topping_up: 'Adding credits...',
+    complete: 'Complete',
     error: 'Something went wrong',
   };
   return descriptions[step];
@@ -293,6 +363,7 @@ export function getStepProgress(step: BridgeStep): number {
   const progress: Record<BridgeStep, number> = {
     init: 0,
     configure_keys: 10,
+    enter_identity: 10,
     generating_keys: 20,
     awaiting_deposit: 30,
     detecting_deposit: 30,
@@ -301,6 +372,7 @@ export function getStepProgress(step: BridgeStep): number {
     broadcasting: 70,
     waiting_islock: 80,
     registering_identity: 90,
+    topping_up: 90,
     complete: 100,
     error: 0,
   };
@@ -319,6 +391,7 @@ export function isProcessingStep(step: BridgeStep): boolean {
     'broadcasting',
     'waiting_islock',
     'registering_identity',
+    'topping_up',
   ];
   return processingSteps.includes(step);
 }

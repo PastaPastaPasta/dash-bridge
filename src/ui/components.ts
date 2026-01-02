@@ -1,5 +1,5 @@
 import type { BridgeState, KeyType, KeyPurpose, SecurityLevel } from '../types.js';
-import { getStepDescription, getStepProgress, isProcessingStep } from './state.js';
+import { getStepProgress } from './state.js';
 import { generateQRCodeDataUrl } from './qrcode.js';
 import { privateKeyToWif } from '../utils/wif.js';
 import { bytesToHex } from '../utils/hex.js';
@@ -37,29 +37,6 @@ export function render(state: BridgeState, container: HTMLElement): void {
   `;
   wrapper.appendChild(header);
 
-  // Status
-  const status = document.createElement('div');
-  status.className = 'status';
-
-  // Use appropriate indicator based on step type
-  let indicator = '';
-  if (state.step === 'complete') {
-    indicator = '✓';
-  } else if (state.step === 'error') {
-    indicator = '✗';
-  } else if (isProcessingStep(state.step)) {
-    indicator = '⏳';
-  }
-  // No indicator for idle/waiting steps (like deposit) - avoids radio button confusion
-
-  const indicatorClass = isProcessingStep(state.step) ? 'processing' : '';
-  const indicatorHtml = indicator ? `<span class="step-indicator ${indicatorClass}">${indicator}</span>` : '';
-
-  status.innerHTML = `
-    ${indicatorHtml}
-    <span class="step-description" id="step-description">${getStepDescription(state.step)}</span>
-  `;
-  wrapper.appendChild(status);
 
   // Content based on step
   const content = document.createElement('div');
@@ -74,6 +51,10 @@ export function render(state: BridgeState, container: HTMLElement): void {
       content.appendChild(renderConfigureKeysStep(state));
       break;
 
+    case 'enter_identity':
+      content.appendChild(renderEnterIdentityStep(state));
+      break;
+
     case 'awaiting_deposit':
     case 'detecting_deposit':
       content.appendChild(renderDepositStep(state));
@@ -84,6 +65,7 @@ export function render(state: BridgeState, container: HTMLElement): void {
     case 'broadcasting':
     case 'waiting_islock':
     case 'registering_identity':
+    case 'topping_up':
       content.appendChild(renderProcessingStep(state));
       break;
 
@@ -102,14 +84,14 @@ export function render(state: BridgeState, container: HTMLElement): void {
 
 function renderInitStep(state: BridgeState): HTMLElement {
   const div = document.createElement('div');
-  div.className = 'init-step';
+  div.className = 'init-step mode-selection';
 
   // Intro text
   const intro = document.createElement('div');
   intro.className = 'intro';
   intro.innerHTML = `
-    <p>Create a new identity on Dash Platform by depositing Dash.</p>
-    <p>Your keys are generated in your browser and never leave your device.</p>
+    <p>What would you like to do?</p>
+    <p class="intro-secondary">All cryptographic operations happen in your browser.</p>
   `;
   div.appendChild(intro);
 
@@ -122,12 +104,20 @@ function renderInitStep(state: BridgeState): HTMLElement {
   `;
   div.appendChild(networkSelector);
 
-  // Start button
-  const startBtn = document.createElement('button');
-  startBtn.id = 'start-btn';
-  startBtn.className = 'primary-btn';
-  startBtn.textContent = 'Get Started';
-  div.appendChild(startBtn);
+  // Mode selection buttons
+  const modeButtons = document.createElement('div');
+  modeButtons.className = 'mode-buttons';
+  modeButtons.innerHTML = `
+    <button id="mode-create-btn" class="mode-btn primary-btn">
+      <span class="mode-label">Create New Identity</span>
+      <span class="mode-desc">Generate keys and register a new identity</span>
+    </button>
+    <button id="mode-topup-btn" class="mode-btn secondary-btn">
+      <span class="mode-label">Top Up Existing Identity</span>
+      <span class="mode-desc">Add credits to an identity you already own</span>
+    </button>
+  `;
+  div.appendChild(modeButtons);
 
   return div;
 }
@@ -208,17 +198,81 @@ function renderConfigureKeysStep(state: BridgeState): HTMLElement {
   return div;
 }
 
+function renderEnterIdentityStep(state: BridgeState): HTMLElement {
+  const div = document.createElement('div');
+  div.className = 'enter-identity-step';
+
+  // Identity ID input
+  const inputSection = document.createElement('div');
+  inputSection.className = 'identity-input-section';
+  inputSection.innerHTML = `
+    <label class="input-label">Identity ID</label>
+    <input
+      type="text"
+      id="identity-id-input"
+      class="identity-id-input"
+      placeholder="Paste your identity ID here..."
+      value="${state.targetIdentityId || ''}"
+    />
+    <p class="input-hint">The 44-character Base58 identifier for your existing identity</p>
+  `;
+  div.appendChild(inputSection);
+
+  // Validation message placeholder
+  const validationMsg = document.createElement('p');
+  validationMsg.id = 'validation-msg';
+  validationMsg.className = 'validation-msg hidden';
+  div.appendChild(validationMsg);
+
+  // Navigation buttons
+  const navButtons = document.createElement('div');
+  navButtons.className = 'nav-buttons';
+
+  const backBtn = document.createElement('button');
+  backBtn.id = 'back-btn';
+  backBtn.className = 'secondary-btn';
+  backBtn.textContent = 'Back';
+  navButtons.appendChild(backBtn);
+
+  const continueBtn = document.createElement('button');
+  continueBtn.id = 'continue-topup-btn';
+  continueBtn.className = 'primary-btn';
+  continueBtn.textContent = 'Continue';
+  navButtons.appendChild(continueBtn);
+
+  div.appendChild(navButtons);
+
+  return div;
+}
+
 function renderDepositStep(state: BridgeState): HTMLElement {
   const div = document.createElement('div');
-  div.className = 'deposit-step';
+  div.className = `deposit-step ${state.mode === 'topup' ? 'topup-deposit' : ''}`;
 
   const address = state.depositAddress || '';
+  const isTopUp = state.mode === 'topup';
 
-  // Primary instruction - integrates minimum amount
+  // Primary instruction - mode-aware headline
   const headline = document.createElement('h2');
   headline.className = 'deposit-headline';
-  headline.innerHTML = 'Send at least <strong>0.003 DASH</strong>';
+  if (isTopUp && state.targetIdentityId) {
+    // Truncate identity ID for display
+    const truncatedId = state.targetIdentityId.length > 12
+      ? `${state.targetIdentityId.slice(0, 8)}...${state.targetIdentityId.slice(-4)}`
+      : state.targetIdentityId;
+    headline.innerHTML = `Top up <code class="inline-id">${truncatedId}</code>`;
+  } else {
+    headline.innerHTML = 'Send at least <strong>0.003 DASH</strong>';
+  }
   div.appendChild(headline);
+
+  // Amount instruction for top-up mode (separate line)
+  if (isTopUp) {
+    const amountInstruction = document.createElement('p');
+    amountInstruction.className = 'deposit-instruction';
+    amountInstruction.innerHTML = 'Send at least <strong>0.003 DASH</strong>';
+    div.appendChild(amountInstruction);
+  }
 
   // Secondary reassurance - single place for "we'll continue" message
   const reassurance = document.createElement('p');
@@ -334,11 +388,23 @@ function renderDepositStep(state: BridgeState): HTMLElement {
     div.appendChild(recheckSection);
   }
 
-  // Key backup confirmation - styled as a positive state change
-  const backupNote = document.createElement('p');
-  backupNote.className = 'backup-note';
-  backupNote.innerHTML = '<span class="backup-check">✓</span> Keys saved. Keep the download safe if you close this page.';
-  div.appendChild(backupNote);
+  // Mode-specific note at bottom
+  if (state.mode === 'topup') {
+    // One-time key warning for top-up
+    const keyWarning = document.createElement('div');
+    keyWarning.className = 'key-warning';
+    keyWarning.innerHTML = `
+      <p><strong>Important:</strong> This is a one-time address.</p>
+      <p>A recovery key was downloaded automatically. Keep it safe to recover funds if something goes wrong.</p>
+    `;
+    div.appendChild(keyWarning);
+  } else {
+    // Key backup confirmation for create mode
+    const backupNote = document.createElement('p');
+    backupNote.className = 'backup-note';
+    backupNote.innerHTML = '<span class="backup-check">✓</span> Keys saved. Keep the download safe if you close this page.';
+    div.appendChild(backupNote);
+  }
 
   return div;
 }
@@ -346,59 +412,119 @@ function renderDepositStep(state: BridgeState): HTMLElement {
 function renderProcessingStep(state: BridgeState): HTMLElement {
   const div = document.createElement('div');
   div.className = 'processing-step';
+  const isTopUp = state.mode === 'topup';
+
+  // Headline
+  const headline = document.createElement('h2');
+  headline.className = 'processing-headline';
+  headline.textContent = isTopUp ? 'Processing top-up' : 'Creating your identity';
+  div.appendChild(headline);
+
+  // Subtitle
+  const subtitle = document.createElement('p');
+  subtitle.className = 'processing-subtitle';
+  subtitle.textContent = isTopUp
+    ? 'Adding credits to your identity on Dash Platform.'
+    : 'Registering your identity on Dash Platform. This may take a moment.';
+  div.appendChild(subtitle);
 
   const spinner = document.createElement('div');
   spinner.className = 'spinner large';
   div.appendChild(spinner);
 
-  const info = document.createElement('div');
-  info.className = 'processing-info';
+  // Status text
+  const status = document.createElement('p');
+  status.className = 'processing-status';
+  status.textContent = 'Waiting for confirmation...';
+  div.appendChild(status);
+
+  // Transaction details card
+  const detailsCard = document.createElement('div');
+  detailsCard.className = 'processing-details';
 
   if (state.txid) {
-    info.innerHTML = `<p>Transaction ID: <code>${state.txid}</code></p>`;
+    const txRow = document.createElement('div');
+    txRow.className = 'detail-row';
+    txRow.innerHTML = `
+      <label>Transaction ID</label>
+      <code class="txid">${state.txid}</code>
+    `;
+    detailsCard.appendChild(txRow);
   }
 
   if (state.depositAmount) {
     const amountDash = Number(state.depositAmount) / 100_000_000;
-    info.innerHTML += `<p>Amount: ${amountDash.toFixed(8)} DASH</p>`;
+    const amountRow = document.createElement('div');
+    amountRow.className = 'detail-row';
+    amountRow.innerHTML = `
+      <label>Amount</label>
+      <span class="amount">${amountDash.toFixed(8)} DASH</span>
+    `;
+    detailsCard.appendChild(amountRow);
   }
 
-  div.appendChild(info);
+  if (detailsCard.children.length > 0) {
+    div.appendChild(detailsCard);
+  }
+
   return div;
 }
 
 function renderCompleteStep(state: BridgeState): HTMLElement {
   const div = document.createElement('div');
-  div.className = 'complete-step';
+  const isTopUp = state.mode === 'topup';
+  div.className = `complete-step ${isTopUp ? 'topup-complete' : ''}`;
 
-  // Lead with the required action, not the celebration
+  // Lead with mode-specific headline
   const headline = document.createElement('h2');
   headline.className = 'complete-headline';
-  headline.textContent = 'Save your keys';
+  headline.textContent = isTopUp ? 'Top-up complete!' : 'Save your keys';
   div.appendChild(headline);
 
   const subtitle = document.createElement('p');
   subtitle.className = 'complete-subtitle';
-  subtitle.textContent = 'Your identity was created. Download your keys to access it.';
+  subtitle.textContent = isTopUp
+    ? 'Credits have been added to your identity.'
+    : 'Your identity was created. Download your keys to access it.';
   div.appendChild(subtitle);
 
-  // Primary action - key backup
-  const backupSection = document.createElement('div');
-  backupSection.className = 'backup-section';
-  backupSection.innerHTML = `
-    <button id="download-keys-btn" class="primary-btn">Download Key Backup</button>
-    <p class="backup-warning">Keys cannot be recovered if lost.</p>
-  `;
-  div.appendChild(backupSection);
+  if (!isTopUp) {
+    // Primary action - key backup (only for create mode)
+    const backupSection = document.createElement('div');
+    backupSection.className = 'backup-section';
+    backupSection.innerHTML = `
+      <button id="download-keys-btn" class="primary-btn">Download Key Backup</button>
+      <p class="backup-warning">Keys cannot be recovered if lost.</p>
+    `;
+    div.appendChild(backupSection);
+  }
 
-  // Secondary info - identity ID
+  // Identity ID info
   const identityInfo = document.createElement('div');
   identityInfo.className = 'identity-info';
   identityInfo.innerHTML = `
-    <label>Your Identity ID</label>
-    <code class="identity-id">${state.identityId || 'Unknown'}</code>
+    <label>${isTopUp ? 'Identity ID' : 'Your Identity ID'}</label>
+    <code class="identity-id">${state.identityId || state.targetIdentityId || 'Unknown'}</code>
   `;
   div.appendChild(identityInfo);
+
+  // Transaction ID (for top-up mode)
+  if (isTopUp && state.txid) {
+    const txInfo = document.createElement('div');
+    txInfo.className = 'tx-info';
+    txInfo.innerHTML = `
+      <label>Transaction ID</label>
+      <code class="txid">${state.txid}</code>
+    `;
+    div.appendChild(txInfo);
+  }
+
+  // Start over button (for both modes)
+  const startOverBtn = document.createElement('button');
+  startOverBtn.id = 'retry-btn';
+  startOverBtn.className = 'secondary-btn';
+  startOverBtn.textContent = 'Start Over';
+  div.appendChild(startOverBtn);
 
   return div;
 }
@@ -422,20 +548,21 @@ function renderErrorStep(state: BridgeState): HTMLElement {
  */
 export function createKeyBackup(state: BridgeState): string {
   const network = getNetwork(state.network);
+  const isTopUp = state.mode === 'topup';
 
-  const backup = {
+  const backup: Record<string, unknown> = {
     network: state.network,
     created: new Date().toISOString(),
-    mnemonic: state.mnemonic,
-    identityId: state.identityId,
-    assetLockKey: state.assetLockKeyPair
-      ? {
-          wif: privateKeyToWif(state.assetLockKeyPair.privateKey, network),
-          publicKeyHex: bytesToHex(state.assetLockKeyPair.publicKey),
-          derivationPath: getAssetLockDerivationPath(state.network),
-        }
-      : null,
-    identityKeys: state.identityKeys.map((key) => ({
+    mode: state.mode,
+    depositAddress: state.depositAddress,
+    txid: state.txid,
+  };
+
+  // For create mode: include mnemonic and identity keys
+  if (!isTopUp) {
+    backup.mnemonic = state.mnemonic;
+    backup.identityId = state.identityId;
+    backup.identityKeys = state.identityKeys.map((key) => ({
       id: key.id,
       name: key.name,
       keyType: key.keyType,
@@ -445,10 +572,25 @@ export function createKeyBackup(state: BridgeState): string {
       privateKeyHex: key.privateKeyHex,
       publicKeyHex: key.publicKeyHex,
       derivationPath: key.derivationPath,
-    })),
-    depositAddress: state.depositAddress,
-    txid: state.txid,
-  };
+    }));
+    backup.assetLockKey = state.assetLockKeyPair
+      ? {
+          wif: privateKeyToWif(state.assetLockKeyPair.privateKey, network),
+          publicKeyHex: bytesToHex(state.assetLockKeyPair.publicKey),
+          derivationPath: getAssetLockDerivationPath(state.network),
+        }
+      : null;
+  } else {
+    // For top-up mode: include target identity and one-time key
+    backup.targetIdentityId = state.targetIdentityId;
+    backup.assetLockKey = state.assetLockKeyPair
+      ? {
+          wif: privateKeyToWif(state.assetLockKeyPair.privateKey, network),
+          publicKeyHex: bytesToHex(state.assetLockKeyPair.publicKey),
+          note: 'One-time key for top-up. Use this WIF to recover funds if top-up fails.',
+        }
+      : null;
+  }
 
   return JSON.stringify(backup, null, 2);
 }
@@ -460,15 +602,21 @@ export function downloadKeyBackup(state: BridgeState): void {
   const backup = createKeyBackup(state);
   const blob = new Blob([backup], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
+  const isTopUp = state.mode === 'topup';
 
-  // Use identity ID if available, otherwise use deposit address or timestamp
+  // Generate descriptive filename based on mode and available data
   let filename: string;
-  if (state.identityId) {
+  if (isTopUp && state.targetIdentityId) {
+    // Top-up mode: include target identity ID for reference
+    const idShort = state.targetIdentityId.slice(0, 8);
+    filename = `dash-topup-${idShort}-recovery.json`;
+  } else if (state.identityId) {
     filename = `dash-identity-${state.identityId}.json`;
   } else if (state.depositAddress) {
     // Use first/last chars of address for recognizability
     const addr = state.depositAddress;
-    filename = `dash-keys-${addr.slice(0, 6)}-${addr.slice(-4)}-pending.json`;
+    const prefix = isTopUp ? 'dash-topup' : 'dash-keys';
+    filename = `${prefix}-${addr.slice(0, 6)}-${addr.slice(-4)}-pending.json`;
   } else {
     filename = `dash-keys-${Date.now()}.json`;
   }

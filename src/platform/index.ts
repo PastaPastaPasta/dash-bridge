@@ -8,4 +8,5 @@ export {
   createPublicKeyInfo,
   publicKeyToBase64,
   registerIdentity,
+  topUpIdentity,
 } from './identity.js';

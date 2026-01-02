@@ -143,3 +143,44 @@ export async function registerIdentity(
     revision: identity.revision || 0,
   };
 }
+
+/**
+ * Top up an existing identity on Dash Platform
+ *
+ * This is simpler than identity creation:
+ * - No identity keys needed
+ * - Just needs identityId, proof, and asset lock private key
+ *
+ * Note: Uses trusted mode because topUp needs to fetch the identity first,
+ * which requires quorum verification that's only available in trusted mode.
+ */
+export async function topUpIdentity(
+  identityId: string,
+  assetLockProof: string,
+  assetLockPrivateKeyWif: string,
+  network: 'testnet' | 'mainnet'
+): Promise<{ success: boolean; balance?: number }> {
+  // Initialize SDK for the target network (trusted mode required for identity fetch)
+  const sdk = network === 'mainnet'
+    ? EvoSDK.mainnetTrusted()
+    : EvoSDK.testnetTrusted();
+
+  // Connect to the network
+  console.log(`Connecting to ${network}...`);
+  await sdk.connect();
+  console.log('Connected to Platform');
+
+  console.log('Topping up identity:', identityId);
+  const result = await sdk.identities.topUp({
+    identityId,
+    assetLockProof,
+    assetLockPrivateKeyWif,
+  });
+
+  console.log('Top-up result:', result);
+
+  return {
+    success: true,
+    balance: result.balance || undefined,
+  };
+}

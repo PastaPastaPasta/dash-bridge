@@ -61,9 +61,15 @@ export interface IdentityKeyConfig {
   derivationPath?: string;
 }
 
+/**
+ * Bridge operation mode
+ */
+export type BridgeMode = 'create' | 'topup';
+
 export type BridgeStep =
   | 'init'
   | 'configure_keys'
+  | 'enter_identity'      // Top-up: user enters identity ID
   | 'generating_keys'
   | 'awaiting_deposit'
   | 'detecting_deposit'
@@ -72,12 +78,15 @@ export type BridgeStep =
   | 'broadcasting'
   | 'waiting_islock'
   | 'registering_identity'
+  | 'topping_up'          // Top-up: calling sdk.identities.topUp()
   | 'complete'
   | 'error';
 
 export interface BridgeState {
   step: BridgeStep;
   network: 'testnet' | 'mainnet';
+  /** Bridge operation mode */
+  mode: BridgeMode;
   /** BIP39 mnemonic (12 words) for HD key derivation */
   mnemonic?: string;
   assetLockKeyPair?: KeyPair;
@@ -96,4 +105,8 @@ export interface BridgeState {
   depositTimedOut?: boolean;
   /** Current detected deposit amount (may be below minimum) */
   detectedDepositAmount?: number;
+  /** Target identity ID for top-up (user-provided) */
+  targetIdentityId?: string;
+  /** Whether asset lock key is a one-time random key (for top-up) vs HD-derived */
+  isOneTimeKey?: boolean;
 }
