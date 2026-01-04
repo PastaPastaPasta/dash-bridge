@@ -381,12 +381,12 @@ function renderDepositStep(state: BridgeState): HTMLElement {
   qrSection.appendChild(qrContainer);
 
   // Generate QR code asynchronously
-  generateQRCodeDataUrl(address, 180).then((dataUrl) => {
+  generateQRCodeDataUrl(address, 200).then((dataUrl) => {
     const img = document.createElement('img');
     img.src = dataUrl;
     img.alt = 'Deposit Address QR Code';
-    img.width = 180;
-    img.height = 180;
+    img.width = 200;
+    img.height = 200;
     qrContainer.innerHTML = '';
     qrContainer.appendChild(img);
   }).catch((err) => {
