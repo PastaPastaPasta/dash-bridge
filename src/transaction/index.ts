@@ -24,6 +24,7 @@ export {
   type AssetLockTransaction,
   serializeTransaction,
   calculateTxId,
+  calculateTxIdFromBytes,
   createAssetLockTransaction,
   cloneTransaction,
 } from './builder.js';

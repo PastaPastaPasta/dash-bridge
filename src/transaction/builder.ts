@@ -65,14 +65,21 @@ export function serializeTransaction(tx: AssetLockTransaction): Uint8Array {
 }
 
 /**
+ * Calculate transaction ID from raw serialized bytes
+ */
+export function calculateTxIdFromBytes(txBytes: Uint8Array): string {
+  const hash = hash256(txBytes);
+  return Array.from(reverseBytes(hash))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+/**
  * Calculate transaction ID (reversed hash256 of serialized tx)
  */
 export function calculateTxId(tx: AssetLockTransaction): string {
   const serialized = serializeTransaction(tx);
-  const hash = hash256(serialized);
-  return Array.from(reverseBytes(hash))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
+  return calculateTxIdFromBytes(serialized);
 }
 
 /**

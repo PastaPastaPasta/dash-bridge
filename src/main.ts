@@ -1,8 +1,7 @@
 import { getNetwork } from './config.js';
-import { publicKeyToAddress, signTransaction, generateKeyPair } from './crypto/index.js';
+import { publicKeyToAddress, signTransaction, generateKeyPair, hash160 } from './crypto/index.js';
 import { deriveAssetLockKeyPair } from './crypto/hd.js';
-import { createAssetLockTransaction, serializeTransaction } from './transaction/index.js';
-import { InsightClient } from './api/insight.js';
+import { createAssetLockTransaction, serializeTransaction, calculateTxIdFromBytes } from './transaction/index.js';
 import { DAPIClient } from './api/dapi.js';
 import { buildInstantAssetLockProof } from './proof/index.js';
 import { registerIdentity, topUpIdentity, updateIdentity, AddKeyConfig } from './platform/index.js';
@@ -85,7 +84,6 @@ import type { BridgeState } from './types.js';
 
 // Global state
 let state: BridgeState;
-let insightClient: InsightClient;
 let dapiClient: DAPIClient;
 
 /**
@@ -98,7 +96,6 @@ function init() {
 
   // Initialize state
   state = createInitialState(network);
-  insightClient = new InsightClient(getNetwork(network));
   dapiClient = new DAPIClient({ network });
 
   // Render UI
@@ -169,9 +166,8 @@ function setupEventListeners(container: HTMLElement) {
     btn.addEventListener('click', () => {
       const network = (btn as HTMLElement).dataset.network as 'testnet' | 'mainnet';
       if (network && network !== state.network) {
-        // Update state and reinitialize clients for new network
+        // Update state and reinitialize client for new network
         updateState(setNetwork(state, network));
-        insightClient = new InsightClient(getNetwork(network));
         dapiClient = new DAPIClient({ network });
       }
     });
@@ -922,15 +918,15 @@ async function startTopUp() {
     // CRITICAL: User must have this to recover funds if something goes wrong
     downloadKeyBackup(stateWithKeys);
 
-    // Step 2: Wait for deposit
+    // Step 2: Wait for deposit (using DAPI subscription)
     updateState(setStep(stateWithKeys, 'detecting_deposit'));
 
     const minAmount = 300000; // 0.003 DASH minimum
-    const depositResult = await insightClient.waitForUtxo(
-      depositAddress,
+    const depositPubKeyHash = hash160(assetLockKeyPair.publicKey);
+    const depositResult = await dapiClient.waitForDeposit(
+      depositPubKeyHash,
       minAmount,
-      120000, // 2 minutes before showing recheck button
-      3000    // poll every 3 seconds
+      120000 // 2 minutes before showing recheck button
     );
 
     // Handle timeout - show recheck button with any detected amount
@@ -967,16 +963,33 @@ async function startTopUp() {
 
     updateState(setTransactionSigned(state, signedTxHex));
 
-    // Step 5: Broadcast transaction
-    const txid = await insightClient.broadcastTransaction(signedTxHex);
-
-    updateState(setTransactionBroadcast(state, txid));
-
-    // Step 6: Wait for InstantSend lock
+    // Step 5: Wait for InstantSend lock
+    // Start subscription BEFORE broadcast to avoid race condition where islock arrives
+    // before we're listening
     updateState(setStep(state, 'waiting_islock'));
 
+    // Compute txid from signed transaction bytes (before broadcast)
+    const txid = calculateTxIdFromBytes(signedTxBytes);
+
+    // Compute pubKeyHash for bloom filter matching
+    const pubKeyHash = hash160(assetLockKeyPair.publicKey);
+
     console.log('Waiting for InstantSend lock...');
-    const islockBytes = await dapiClient.waitForInstantSendLock(txid, 60000);
+    const islockBytes = await dapiClient.waitForInstantSendLock(
+      txid,
+      pubKeyHash,
+      { txid: utxo.txid, vout: utxo.vout },
+      60000,
+      undefined,
+      async () => {
+        // Broadcast transaction now that subscription is ready
+        const broadcastedTxid = await dapiClient.broadcastTransaction(signedTxHex);
+        if (broadcastedTxid !== txid) {
+          console.warn(`Broadcast txid ${broadcastedTxid} differs from computed txid ${txid}`);
+        }
+        updateState(setTransactionBroadcast(state, txid));
+      }
+    );
     console.log('InstantSend lock received:', islockBytes.length, 'bytes');
 
     const assetLockProof = buildInstantAssetLockProof(
@@ -987,7 +1000,7 @@ async function startTopUp() {
 
     updateState(setInstantLockReceived(state, islockBytes, assetLockProof));
 
-    // Step 7: Top up identity (different from create)
+    // Step 6: Top up identity (different from create)
     updateState(setStep(state, 'topping_up'));
 
     const assetLockPrivateKeyWif = privateKeyToWif(
@@ -1037,15 +1050,15 @@ async function startBridge() {
     // This ensures users can recover funds if they reload the page
     downloadKeyBackup(state);
 
-    // Step 2: Wait for deposit
+    // Step 2: Wait for deposit (using DAPI subscription)
     updateState(setStep(state, 'detecting_deposit'));
 
     const minAmount = 300000; // 0.003 DASH minimum
-    const depositResult = await insightClient.waitForUtxo(
-      depositAddress,
+    const depositPubKeyHash = hash160(assetLockKeyPair.publicKey);
+    const depositResult = await dapiClient.waitForDeposit(
+      depositPubKeyHash,
       minAmount,
-      120000, // 2 minutes before showing recheck button
-      3000    // poll every 3 seconds
+      120000 // 2 minutes before showing recheck button
     );
 
     // Handle timeout - show recheck button with any detected amount
@@ -1082,16 +1095,33 @@ async function startBridge() {
 
     updateState(setTransactionSigned(state, signedTxHex));
 
-    // Step 5: Broadcast transaction
-    const txid = await insightClient.broadcastTransaction(signedTxHex);
-
-    updateState(setTransactionBroadcast(state, txid));
-
-    // Step 6: Wait for InstantSend lock
+    // Step 5: Wait for InstantSend lock
+    // Start subscription BEFORE broadcast to avoid race condition where islock arrives
+    // before we're listening
     updateState(setStep(state, 'waiting_islock'));
 
+    // Compute txid from signed transaction bytes (before broadcast)
+    const txid = calculateTxIdFromBytes(signedTxBytes);
+
+    // Compute pubKeyHash for bloom filter matching
+    const pubKeyHash = hash160(assetLockKeyPair.publicKey);
+
     console.log('Waiting for InstantSend lock...');
-    const islockBytes = await dapiClient.waitForInstantSendLock(txid, 60000);
+    const islockBytes = await dapiClient.waitForInstantSendLock(
+      txid,
+      pubKeyHash,
+      { txid: utxo.txid, vout: utxo.vout },
+      60000,
+      undefined,
+      async () => {
+        // Broadcast transaction now that subscription is ready
+        const broadcastedTxid = await dapiClient.broadcastTransaction(signedTxHex);
+        if (broadcastedTxid !== txid) {
+          console.warn(`Broadcast txid ${broadcastedTxid} differs from computed txid ${txid}`);
+        }
+        updateState(setTransactionBroadcast(state, txid));
+      }
+    );
     console.log('InstantSend lock received:', islockBytes.length, 'bytes');
 
     const assetLockProof = buildInstantAssetLockProof(
@@ -1102,7 +1132,7 @@ async function startBridge() {
 
     updateState(setInstantLockReceived(state, islockBytes, assetLockProof));
 
-    // Step 7: Register identity
+    // Step 6: Register identity
     updateState(setStep(state, 'registering_identity'));
 
     const assetLockPrivateKeyWif = privateKeyToWif(
@@ -1134,20 +1164,20 @@ async function startBridge() {
  * Recheck for deposit (called when user clicks "Check Again" after timeout)
  */
 async function recheckDeposit() {
-  if (!state.depositAddress) {
-    console.error('No deposit address available');
+  if (!state.depositAddress || !state.assetLockKeyPair) {
+    console.error('No deposit address or key pair available');
     return;
   }
 
-  // Reset timeout state and start polling again
+  // Reset timeout state and start watching again
   updateState(setDepositTimedOut(state, false, 0));
 
   const minAmount = 300000; // 0.003 DASH minimum
-  const depositResult = await insightClient.waitForUtxo(
-    state.depositAddress,
+  const depositPubKeyHash = hash160(state.assetLockKeyPair.publicKey);
+  const depositResult = await dapiClient.waitForDeposit(
+    depositPubKeyHash,
     minAmount,
-    120000, // 2 minutes before showing recheck button
-    3000    // poll every 3 seconds
+    120000 // 2 minutes before showing recheck button
   );
 
   // Handle timeout - show recheck button again with any detected amount
@@ -1189,16 +1219,33 @@ async function recheckDeposit() {
 
     updateState(setTransactionSigned(state, signedTxHex));
 
-    // Step 5: Broadcast transaction
-    const txid = await insightClient.broadcastTransaction(signedTxHex);
-
-    updateState(setTransactionBroadcast(state, txid));
-
-    // Step 6: Wait for InstantSend lock
+    // Step 5: Wait for InstantSend lock
+    // Start subscription BEFORE broadcast to avoid race condition where islock arrives
+    // before we're listening
     updateState(setStep(state, 'waiting_islock'));
 
+    // Compute txid from signed transaction bytes (before broadcast)
+    const txid = calculateTxIdFromBytes(signedTxBytes);
+
+    // Compute pubKeyHash for bloom filter matching
+    const pubKeyHash = hash160(assetLockKeyPair.publicKey);
+
     console.log('Waiting for InstantSend lock...');
-    const islockBytes = await dapiClient.waitForInstantSendLock(txid, 60000);
+    const islockBytes = await dapiClient.waitForInstantSendLock(
+      txid,
+      pubKeyHash,
+      { txid: utxo.txid, vout: utxo.vout },
+      60000,
+      undefined,
+      async () => {
+        // Broadcast transaction now that subscription is ready
+        const broadcastedTxid = await dapiClient.broadcastTransaction(signedTxHex);
+        if (broadcastedTxid !== txid) {
+          console.warn(`Broadcast txid ${broadcastedTxid} differs from computed txid ${txid}`);
+        }
+        updateState(setTransactionBroadcast(state, txid));
+      }
+    );
     console.log('InstantSend lock received:', islockBytes.length, 'bytes');
 
     const assetLockProof = buildInstantAssetLockProof(
@@ -1209,7 +1256,7 @@ async function recheckDeposit() {
 
     updateState(setInstantLockReceived(state, islockBytes, assetLockProof));
 
-    // Step 7: Register identity
+    // Step 6: Register identity
     updateState(setStep(state, 'registering_identity'));
 
     const assetLockPrivateKeyWif = privateKeyToWif(

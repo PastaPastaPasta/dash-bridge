@@ -33,6 +33,8 @@ declare module '@dashevo/dapi-client' {
 
   interface CoreMethods {
     getBestBlockHeight(): Promise<number>;
+    broadcastTransaction(transaction: Buffer | Uint8Array): Promise<string>;
+    getTransaction(txid: string): Promise<Buffer>;
     subscribeToTransactionsWithProofs(
       bloomFilter: BloomFilterParams,
       options?: SubscribeOptions
