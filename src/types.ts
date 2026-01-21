@@ -141,7 +141,40 @@ export interface ManageNewKeyConfig {
   };
   /** For imported keys: base64-encoded public key data */
   importedPublicKeyBase64?: string;
+  /** HD derivation info when created via HD seed */
+  hdDerivation?: {
+    keyIndex: number;
+    identityIndex: number;
+    derivationPath: string;
+  };
 }
+
+/**
+ * HD-derived key match result during verification
+ */
+export interface HDKeyMatchResult {
+  /** The key index that was derived */
+  keyIndex: number;
+  /** The full derivation path */
+  derivationPath: string;
+  /** Whether this key matched an identity key */
+  matched: boolean;
+  /** If matched, the on-chain key ID */
+  matchedKeyId?: number;
+  /** If matched, the security level */
+  matchedSecurityLevel?: number;
+  /** If matched, the purpose */
+  matchedPurpose?: number;
+  /** If matched, whether that key is disabled */
+  isDisabled?: boolean;
+  /** The derived public key hex (for display/debugging) */
+  publicKeyHex: string;
+}
+
+/**
+ * Authentication method for manage mode
+ */
+export type ManageAuthMethod = 'wif' | 'hd_seed';
 
 export type BridgeStep =
   | 'init'
@@ -263,4 +296,22 @@ export interface BridgeState {
   manageUpdateResult?: { success: boolean; error?: string };
   /** Manage: key validation error message */
   manageKeyValidationError?: string;
+
+  // HD Seed support for manage mode
+  /** Manage: authentication method (WIF or HD seed) */
+  manageAuthMethod?: ManageAuthMethod;
+  /** Manage: HD mnemonic (when using HD seed mode) */
+  manageMnemonic?: string;
+  /** Manage: identity index for HD derivation (default 0) */
+  manageIdentityIndex?: number;
+  /** Manage: HD verification results (derived keys vs on-chain keys) */
+  manageHDVerificationResults?: HDKeyMatchResult[];
+  /** Manage: highest key index found during HD verification */
+  manageMaxKeyIndex?: number;
+  /** Manage: whether HD verification is in progress */
+  manageHDVerifying?: boolean;
+  /** Manage: error during HD verification */
+  manageHDVerificationError?: string;
+  /** Manage: the signing key match result from HD (if using HD mode) */
+  manageHDSigningKeyMatch?: HDKeyMatchResult;
 }

@@ -1694,6 +1694,264 @@
       gap: 12px;
       margin-top: 24px;
     }
+
+    /* ============================================================================
+       HD Mode Styles
+       ============================================================================ */
+
+    /* Auth method toggle */
+    .auth-method-toggle {
+      margin-bottom: 20px;
+    }
+
+    .auth-method-toggle .toggle-label {
+      display: block;
+      color: #b0b0b0;
+      font-size: 0.9rem;
+      font-weight: 500;
+      margin-bottom: 10px;
+    }
+
+    .toggle-buttons {
+      display: flex;
+      gap: 8px;
+    }
+
+    .toggle-btn {
+      flex: 1;
+      padding: 12px 16px;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      border: 2px solid rgba(255, 255, 255, 0.15);
+      background: rgba(255, 255, 255, 0.05);
+      color: #888;
+    }
+
+    .toggle-btn:hover {
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    .toggle-btn.active {
+      background: rgba(0, 141, 228, 0.15);
+      border-color: #008de4;
+      color: #008de4;
+    }
+
+    /* Mnemonic textarea */
+    .mnemonic-textarea {
+      font-family: 'SF Mono', Monaco, monospace;
+      font-size: 0.95rem;
+      line-height: 1.5;
+      resize: vertical;
+      min-height: 80px;
+    }
+
+    /* Advanced options toggle */
+    .advanced-toggle details {
+      margin-top: 12px;
+    }
+
+    .advanced-toggle summary {
+      color: #888;
+      font-size: 0.85rem;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .advanced-toggle summary:hover {
+      color: #b0b0b0;
+    }
+
+    .advanced-options {
+      margin-top: 12px;
+      padding: 16px;
+      background: rgba(0, 0, 0, 0.2);
+      border-radius: 8px;
+    }
+
+    .manage-input.small {
+      width: 100px;
+      padding: 10px 14px;
+      text-align: center;
+    }
+
+    /* HD status messages */
+    .hd-status {
+      font-size: 0.85rem;
+      margin-top: 8px;
+      padding: 8px 12px;
+      border-radius: 6px;
+    }
+
+    .hd-status.loading {
+      color: #008de4;
+      background: rgba(0, 141, 228, 0.1);
+    }
+
+    .hd-status.success {
+      color: #4CAF50;
+      background: rgba(76, 175, 80, 0.1);
+    }
+
+    .hd-status.error {
+      color: #f44336;
+      background: rgba(244, 67, 54, 0.1);
+    }
+
+    .hd-status.info {
+      color: #b0b0b0;
+      background: rgba(255, 255, 255, 0.05);
+    }
+
+    .hd-status.warning {
+      color: #ff9800;
+      background: rgba(255, 152, 0, 0.1);
+    }
+
+    /* HD verification results table */
+    .hd-verification-table {
+      margin-top: 16px;
+      background: rgba(0, 0, 0, 0.2);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+    }
+
+    .hd-verification-table h4 {
+      color: #b0b0b0;
+      font-size: 0.85rem;
+      font-weight: 600;
+      margin-bottom: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .hd-verification-table table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+    }
+
+    .hd-verification-table th {
+      text-align: left;
+      padding: 8px 10px;
+      color: #666;
+      font-weight: 500;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .hd-verification-table td {
+      padding: 10px;
+      color: #b0b0b0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .hd-verification-table tr.matched td {
+      color: #e0e0e0;
+    }
+
+    .hd-verification-table tr.unmatched td {
+      color: #666;
+    }
+
+    .hd-verification-table .match-status.matched {
+      color: #4CAF50;
+    }
+
+    .hd-verification-table .match-status.unmatched {
+      color: #666;
+    }
+
+    .hd-verification-table .disabled-tag {
+      font-size: 0.7rem;
+      background: rgba(244, 67, 54, 0.2);
+      color: #f44336;
+      padding: 2px 6px;
+      border-radius: 4px;
+      margin-left: 6px;
+    }
+
+    .hd-verification-table code {
+      font-size: 0.8rem;
+      background: rgba(0, 0, 0, 0.3);
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+
+    .hd-verification-table .unmatched-more td {
+      color: #555;
+      font-style: italic;
+      text-align: center;
+    }
+
+    /* Key derivation display in existing keys */
+    .key-derivation {
+      font-size: 0.75rem;
+    }
+
+    .key-derivation .derivation-path {
+      background: rgba(0, 141, 228, 0.15);
+      color: #008de4;
+      padding: 3px 8px;
+      border-radius: 4px;
+      cursor: help;
+    }
+
+    .key-derivation .no-hd {
+      color: #666;
+      font-style: italic;
+    }
+
+    /* Add key derivation info */
+    .add-key-derivation {
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .add-key-derivation .derivation-label {
+      color: #888;
+      font-size: 0.8rem;
+    }
+
+    .add-key-derivation .derivation-path {
+      background: rgba(0, 141, 228, 0.15);
+      color: #008de4;
+      padding: 4px 10px;
+      border-radius: 4px;
+      font-size: 0.8rem;
+    }
+
+    /* HD add key controls */
+    .add-key-controls {
+      margin-top: 12px;
+    }
+
+    .hd-add-key-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .key-index-label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #b0b0b0;
+      font-size: 0.85rem;
+    }
+
+    .key-index-input {
+      width: 80px !important;
+      padding: 10px 12px !important;
+      text-align: center;
+    }
   </style>
 </head>
 <body>

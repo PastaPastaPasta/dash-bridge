@@ -10,6 +10,8 @@ import type {
   DpnsIdentitySource,
   IdentityPublicKeyInfo,
   ManageNewKeyConfig,
+  ManageAuthMethod,
+  HDKeyMatchResult,
 } from '../types.js';
 import {
   generateDefaultIdentityKeysHD,
@@ -105,6 +107,15 @@ export function setMode(state: BridgeState, mode: BridgeMode): BridgeState {
       manageIdentityKeys: undefined,
       manageUpdateResult: undefined,
       manageKeyValidationError: undefined,
+      // Clear HD state
+      manageAuthMethod: undefined,
+      manageMnemonic: undefined,
+      manageIdentityIndex: undefined,
+      manageHDVerificationResults: undefined,
+      manageMaxKeyIndex: undefined,
+      manageHDVerifying: undefined,
+      manageHDVerificationError: undefined,
+      manageHDSigningKeyMatch: undefined,
     };
   }
 }
@@ -981,5 +992,156 @@ export function setManageBackToEntry(state: BridgeState): BridgeState {
     manageKeyValidationError: undefined,
     manageKeysToAdd: [],
     manageKeyIdsToDisable: [],
+    // Clear HD state
+    manageMnemonic: undefined,
+    manageHDVerificationResults: undefined,
+    manageHDSigningKeyMatch: undefined,
+    manageHDVerificationError: undefined,
+    manageMaxKeyIndex: undefined,
+  };
+}
+
+// ============================================================================
+// Identity Management HD Mode State Functions
+// ============================================================================
+
+/**
+ * Set manage authentication method (WIF or HD seed)
+ */
+export function setManageAuthMethod(
+  state: BridgeState,
+  method: ManageAuthMethod
+): BridgeState {
+  return {
+    ...state,
+    manageAuthMethod: method,
+    // Clear WIF-specific state when switching to HD
+    managePrivateKeyWif: method === 'hd_seed' ? undefined : state.managePrivateKeyWif,
+    manageSigningKeyInfo: method === 'hd_seed' ? undefined : state.manageSigningKeyInfo,
+    manageKeyValidationError: method === 'hd_seed' ? undefined : state.manageKeyValidationError,
+    // Clear HD-specific state when switching to WIF
+    manageMnemonic: method === 'wif' ? undefined : state.manageMnemonic,
+    manageIdentityIndex: method === 'wif' ? undefined : state.manageIdentityIndex,
+    manageHDVerificationResults: method === 'wif' ? undefined : state.manageHDVerificationResults,
+    manageHDSigningKeyMatch: method === 'wif' ? undefined : state.manageHDSigningKeyMatch,
+    manageHDVerificationError: method === 'wif' ? undefined : state.manageHDVerificationError,
+    manageMaxKeyIndex: method === 'wif' ? undefined : state.manageMaxKeyIndex,
+  };
+}
+
+/**
+ * Set HD mnemonic for manage mode
+ */
+export function setManageMnemonic(
+  state: BridgeState,
+  mnemonic: string
+): BridgeState {
+  return {
+    ...state,
+    manageMnemonic: mnemonic,
+    // Clear previous verification when mnemonic changes
+    manageHDVerificationResults: undefined,
+    manageHDSigningKeyMatch: undefined,
+    manageHDVerificationError: undefined,
+  };
+}
+
+/**
+ * Set identity index for HD derivation
+ */
+export function setManageIdentityIndex(
+  state: BridgeState,
+  identityIndex: number
+): BridgeState {
+  return {
+    ...state,
+    manageIdentityIndex: identityIndex,
+    // Clear verification when identity index changes
+    manageHDVerificationResults: undefined,
+    manageHDSigningKeyMatch: undefined,
+    manageHDVerificationError: undefined,
+  };
+}
+
+/**
+ * Start HD verification
+ */
+export function setManageHDVerifying(state: BridgeState): BridgeState {
+  return {
+    ...state,
+    manageHDVerifying: true,
+    manageHDVerificationError: undefined,
+  };
+}
+
+/**
+ * Set HD verification results
+ */
+export function setManageHDVerificationResults(
+  state: BridgeState,
+  results: HDKeyMatchResult[],
+  signingKeyMatch: HDKeyMatchResult | null,
+  maxKeyIndex: number
+): BridgeState {
+  return {
+    ...state,
+    manageHDVerifying: false,
+    manageHDVerificationResults: results,
+    manageHDSigningKeyMatch: signingKeyMatch || undefined,
+    manageMaxKeyIndex: maxKeyIndex,
+    manageHDVerificationError: undefined,
+  };
+}
+
+/**
+ * Set HD verification error
+ */
+export function setManageHDVerificationError(
+  state: BridgeState,
+  error: string
+): BridgeState {
+  return {
+    ...state,
+    manageHDVerifying: false,
+    manageHDVerificationError: error,
+  };
+}
+
+/**
+ * Validate HD signing key and proceed to key management view
+ */
+export function setManageHDKeyValidated(
+  state: BridgeState,
+  signingKeyMatch: HDKeyMatchResult,
+  mnemonic: string
+): BridgeState {
+  return {
+    ...state,
+    step: 'manage_view_keys',
+    manageMnemonic: mnemonic,
+    manageHDSigningKeyMatch: signingKeyMatch,
+    // Also set the equivalent WIF-mode fields for compatibility
+    manageSigningKeyInfo: {
+      keyId: signingKeyMatch.matchedKeyId!,
+      securityLevel: signingKeyMatch.matchedSecurityLevel!,
+    },
+    manageKeyValidationError: undefined,
+  };
+}
+
+/**
+ * Add a new key via HD derivation
+ */
+export function addManageNewKeyFromHD(
+  state: BridgeState,
+  config: ManageNewKeyConfig
+): BridgeState {
+  return {
+    ...state,
+    manageKeysToAdd: [...(state.manageKeysToAdd || []), config],
+    // Update max key index if this key uses a higher index
+    manageMaxKeyIndex: config.hdDerivation
+      ? Math.max(state.manageMaxKeyIndex || 0, config.hdDerivation.keyIndex)
+      : state.manageMaxKeyIndex,
   };
 }

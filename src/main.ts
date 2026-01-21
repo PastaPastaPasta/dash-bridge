@@ -1,6 +1,6 @@
 import { getNetwork } from './config.js';
 import { publicKeyToAddress, signTransaction, generateKeyPair } from './crypto/index.js';
-import { deriveAssetLockKeyPair } from './crypto/hd.js';
+import { deriveAssetLockKeyPair, deriveIdentityKey } from './crypto/hd.js';
 import { createAssetLockTransaction, serializeTransaction } from './transaction/index.js';
 import { InsightClient } from './api/insight.js';
 import { DAPIClient } from './api/dapi.js';
@@ -66,6 +66,15 @@ import {
   resetManageState,
   resetManageStateAndRefresh,
   setManageBackToEntry,
+  // Identity Management HD mode state functions
+  setManageAuthMethod,
+  setManageMnemonic,
+  setManageIdentityIndex,
+  setManageHDVerifying,
+  setManageHDVerificationResults,
+  setManageHDVerificationError,
+  setManageHDKeyValidated,
+  addManageNewKeyFromHD,
 } from './ui/index.js';
 import {
   checkMultipleAvailability,
@@ -79,6 +88,8 @@ import {
   getSecurityLevelName,
   getPurposeName,
   generateIdentityKey,
+  verifyHDKeysAgainstIdentity,
+  findHDSigningKey,
 } from './crypto/keys.js';
 import type { KeyType, KeyPurpose, SecurityLevel, ManageNewKeyConfig } from './types.js';
 import type { BridgeState } from './types.js';
@@ -732,8 +743,122 @@ function setupEventListeners(container: HTMLElement) {
   const manageIdentityContinueBtn = container.querySelector('#manage-identity-continue-btn');
   if (manageIdentityContinueBtn) {
     manageIdentityContinueBtn.addEventListener('click', () => {
-      // Just proceed if we have validated key - setManageKeyValidated already transitions
-      // This button is only enabled when validation is complete
+      // For HD mode, we need to transition to view keys
+      if (state.manageAuthMethod === 'hd_seed' && state.manageHDSigningKeyMatch && state.manageMnemonic) {
+        updateState(setManageHDKeyValidated(state, state.manageHDSigningKeyMatch, state.manageMnemonic));
+      }
+      // WIF mode: setManageKeyValidated already transitions, so nothing to do here
+    });
+  }
+
+  // Auth method toggle buttons
+  const authMethodWifBtn = container.querySelector('#auth-method-wif');
+  if (authMethodWifBtn) {
+    authMethodWifBtn.addEventListener('click', () => {
+      if (state.manageAuthMethod !== 'wif') {
+        updateState(setManageAuthMethod(state, 'wif'));
+      }
+    });
+  }
+
+  const authMethodHdBtn = container.querySelector('#auth-method-hd');
+  if (authMethodHdBtn) {
+    authMethodHdBtn.addEventListener('click', () => {
+      if (state.manageAuthMethod !== 'hd_seed') {
+        updateState(setManageAuthMethod(state, 'hd_seed'));
+      }
+    });
+  }
+
+  // Manage mnemonic input - verify on blur or paste
+  const manageMnemonicInput = container.querySelector('#manage-mnemonic-input');
+  if (manageMnemonicInput) {
+    const verifyMnemonic = async () => {
+      const input = manageMnemonicInput as HTMLTextAreaElement;
+      const mnemonic = input.value.trim().toLowerCase();
+
+      if (!mnemonic) {
+        return;
+      }
+
+      // Validate mnemonic format (12 or 24 words)
+      const words = mnemonic.split(/\s+/);
+      if (words.length !== 12 && words.length !== 24) {
+        updateState(setManageHDVerificationError(state, 'Mnemonic must be 12 or 24 words'));
+        return;
+      }
+
+      // Wait for identity fetch if needed
+      const waitForIdentity = (): Promise<void> => {
+        return new Promise((resolve) => {
+          const check = () => {
+            if (!state.manageIdentityFetching) {
+              resolve();
+            } else {
+              setTimeout(check, 100);
+            }
+          };
+          check();
+        });
+      };
+
+      if (state.manageIdentityFetching) {
+        await waitForIdentity();
+      }
+
+      if (!state.manageIdentityKeys || state.manageIdentityKeys.length === 0) {
+        if (!state.manageIdentityFetchError) {
+          updateState(setManageHDVerificationError(state, 'Please enter an identity ID first'));
+        }
+        return;
+      }
+
+      // Start verification
+      updateState(setManageHDVerifying(state));
+
+      try {
+        const identityIndex = state.manageIdentityIndex ?? 0;
+        const results = verifyHDKeysAgainstIdentity(
+          mnemonic,
+          state.manageIdentityKeys,
+          state.network,
+          10, // Check first 10 indices
+          identityIndex
+        );
+
+        const signingKey = findHDSigningKey(results);
+        const maxMatchedIndex = Math.max(
+          ...results.filter(r => r.matched).map(r => r.keyIndex),
+          -1
+        );
+
+        // Update state and store mnemonic
+        let newState = setManageMnemonic(state, mnemonic);
+        newState = setManageHDVerificationResults(newState, results, signingKey, maxMatchedIndex);
+        updateState(newState);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'HD verification failed';
+        updateState(setManageHDVerificationError(state, message));
+      }
+    };
+
+    manageMnemonicInput.addEventListener('blur', verifyMnemonic);
+    manageMnemonicInput.addEventListener('paste', () => setTimeout(verifyMnemonic, 50));
+  }
+
+  // Identity index input
+  const manageIdentityIndexInput = container.querySelector('#manage-identity-index-input');
+  if (manageIdentityIndexInput) {
+    manageIdentityIndexInput.addEventListener('change', (e) => {
+      const value = parseInt((e.target as HTMLInputElement).value, 10);
+      if (!isNaN(value) && value >= 0) {
+        updateState(setManageIdentityIndex(state, value));
+        // Trigger re-verification if mnemonic is present
+        const mnemonicInput = container.querySelector('#manage-mnemonic-input') as HTMLTextAreaElement;
+        if (mnemonicInput && mnemonicInput.value.trim()) {
+          mnemonicInput.dispatchEvent(new Event('blur'));
+        }
+      }
     });
   }
 
@@ -742,31 +867,74 @@ function setupEventListeners(container: HTMLElement) {
   if (addManageKeyBtn) {
     addManageKeyBtn.addEventListener('click', () => {
       const tempId = `new-${Date.now()}`;
-      const generated = generateIdentityKey(
-        0, // temporary id
-        'New Key',
-        'ECDSA_SECP256K1',
-        'AUTHENTICATION',
-        'HIGH',
-        state.network
-      );
 
-      const newKeyConfig: ManageNewKeyConfig = {
-        tempId,
-        keyType: 'ECDSA_SECP256K1',
-        purpose: 'AUTHENTICATION',
-        securityLevel: 'HIGH',
-        source: 'generate',
-        generatedKey: {
-          privateKey: generated.privateKey,
-          publicKey: generated.publicKey,
-          privateKeyHex: generated.privateKeyHex,
-          privateKeyWif: generated.privateKeyWif,
-          publicKeyHex: generated.publicKeyHex,
-        },
-      };
+      if (state.manageAuthMethod === 'hd_seed' && state.manageMnemonic) {
+        // HD mode: derive key at specified or next index
+        const keyIndexInput = container.querySelector('#manage-new-key-index') as HTMLInputElement;
+        const keyIndex = keyIndexInput ? parseInt(keyIndexInput.value, 10) : ((state.manageMaxKeyIndex ?? -1) + 1);
+        const identityIndex = state.manageIdentityIndex ?? 0;
 
-      updateState(addManageNewKey(state, newKeyConfig));
+        const { privateKey, publicKey, derivationPath } = deriveIdentityKey(
+          state.manageMnemonic,
+          keyIndex,
+          state.network,
+          identityIndex
+        );
+
+        const networkConfig = getNetwork(state.network);
+        const privateKeyWif = privateKeyToWif(privateKey, networkConfig);
+        const publicKeyHex = bytesToHex(publicKey);
+        const privateKeyHex = bytesToHex(privateKey);
+
+        const newKeyConfig: ManageNewKeyConfig = {
+          tempId,
+          keyType: 'ECDSA_SECP256K1',
+          purpose: 'AUTHENTICATION',
+          securityLevel: 'HIGH',
+          source: 'generate',
+          generatedKey: {
+            privateKey,
+            publicKey,
+            privateKeyHex,
+            privateKeyWif,
+            publicKeyHex,
+          },
+          hdDerivation: {
+            keyIndex,
+            identityIndex,
+            derivationPath,
+          },
+        };
+
+        updateState(addManageNewKeyFromHD(state, newKeyConfig));
+      } else {
+        // WIF mode: generate random key
+        const generated = generateIdentityKey(
+          0, // temporary id
+          'New Key',
+          'ECDSA_SECP256K1',
+          'AUTHENTICATION',
+          'HIGH',
+          state.network
+        );
+
+        const newKeyConfig: ManageNewKeyConfig = {
+          tempId,
+          keyType: 'ECDSA_SECP256K1',
+          purpose: 'AUTHENTICATION',
+          securityLevel: 'HIGH',
+          source: 'generate',
+          generatedKey: {
+            privateKey: generated.privateKey,
+            publicKey: generated.publicKey,
+            privateKeyHex: generated.privateKeyHex,
+            privateKeyWif: generated.privateKeyWif,
+            publicKeyHex: generated.publicKeyHex,
+          },
+        };
+
+        updateState(addManageNewKey(state, newKeyConfig));
+      }
     });
   }
 
@@ -1352,7 +1520,23 @@ async function startManageUpdate() {
       return;
     }
 
-    if (!state.managePrivateKeyWif) {
+    // Get signing key WIF - different for HD vs WIF mode
+    let signingKeyWif: string;
+
+    if (state.manageAuthMethod === 'hd_seed' && state.manageMnemonic && state.manageHDSigningKeyMatch) {
+      // HD mode: derive the signing key from mnemonic
+      const { privateKey } = deriveIdentityKey(
+        state.manageMnemonic,
+        state.manageHDSigningKeyMatch.keyIndex,
+        state.network,
+        state.manageIdentityIndex ?? 0
+      );
+      const networkConfig = getNetwork(state.network);
+      signingKeyWif = privateKeyToWif(privateKey, networkConfig);
+    } else if (state.managePrivateKeyWif) {
+      // WIF mode: use the provided private key
+      signingKeyWif = state.managePrivateKeyWif;
+    } else {
       updateState(setManageComplete(state, { success: false, error: 'No signing key' }));
       return;
     }
@@ -1360,7 +1544,7 @@ async function startManageUpdate() {
     // Execute update
     const result = await updateIdentity(
       state.targetIdentityId,
-      state.managePrivateKeyWif,
+      signingKeyWif,
       addPublicKeys,
       disablePublicKeyIds,
       state.network

@@ -1302,11 +1302,18 @@ function renderManageEnterIdentityStep(state: BridgeState): HTMLElement {
   const form = document.createElement('div');
   form.className = 'manage-identity-form';
 
+  const authMethod = state.manageAuthMethod || 'wif';
   const isFetching = state.manageIdentityFetching === true;
   const hasFetched = state.manageIdentityKeys !== undefined;
   const hasFetchError = state.manageIdentityFetchError !== undefined;
   const hasValidatedKey = state.manageSigningKeyInfo !== undefined;
   const hasKeyError = state.manageKeyValidationError !== undefined;
+
+  // HD mode state
+  const isHDVerifying = state.manageHDVerifying === true;
+  const hasHDResults = state.manageHDVerificationResults !== undefined;
+  const hasHDError = state.manageHDVerificationError !== undefined;
+  const hasHDSigningKey = state.manageHDSigningKeyMatch !== undefined;
 
   // Identity status message
   let identityStatusHtml = '';
@@ -1319,13 +1326,97 @@ function renderManageEnterIdentityStep(state: BridgeState): HTMLElement {
     identityStatusHtml = `<p class="identity-status success">Identity found with ${keyCount} key${keyCount !== 1 ? 's' : ''}</p>`;
   }
 
-  // Key validation status message
-  let keyValidationHtml = '';
-  if (hasValidatedKey) {
-    const levelName = getSecurityLevelName(state.manageSigningKeyInfo!.securityLevel);
-    keyValidationHtml = `<p class="key-status success">Key matches key #${state.manageSigningKeyInfo!.keyId} (${levelName} level)</p>`;
-  } else if (hasKeyError) {
-    keyValidationHtml = `<p class="key-status error">${escapeHtml(state.manageKeyValidationError!)}</p>`;
+  // WIF mode key validation status
+  let wifKeyValidationHtml = '';
+  if (authMethod === 'wif') {
+    if (hasValidatedKey) {
+      const levelName = getSecurityLevelName(state.manageSigningKeyInfo!.securityLevel);
+      wifKeyValidationHtml = `<p class="key-status success">Key matches key #${state.manageSigningKeyInfo!.keyId} (${levelName} level)</p>`;
+    } else if (hasKeyError) {
+      wifKeyValidationHtml = `<p class="key-status error">${escapeHtml(state.manageKeyValidationError!)}</p>`;
+    }
+  }
+
+  // HD mode status messages
+  let hdStatusHtml = '';
+  if (authMethod === 'hd_seed') {
+    if (isHDVerifying) {
+      hdStatusHtml = '<p class="hd-status loading">Verifying HD keys...</p>';
+    } else if (hasHDError) {
+      hdStatusHtml = `<p class="hd-status error">${escapeHtml(state.manageHDVerificationError!)}</p>`;
+    } else if (hasHDResults) {
+      const matched = state.manageHDVerificationResults!.filter(r => r.matched).length;
+      const total = state.manageIdentityKeys?.length || 0;
+      hdStatusHtml = `<p class="hd-status info">${matched} of ${total} identity keys match HD derivation</p>`;
+
+      if (hasHDSigningKey) {
+        const levelName = getSecurityLevelName(state.manageHDSigningKeyMatch!.matchedSecurityLevel!);
+        hdStatusHtml += `<p class="hd-status success">Found ${levelName} key at index ${state.manageHDSigningKeyMatch!.keyIndex} (key #${state.manageHDSigningKeyMatch!.matchedKeyId})</p>`;
+      } else {
+        hdStatusHtml += '<p class="hd-status warning">No MASTER-level key found. Cannot proceed with this seed.</p>';
+      }
+    }
+  }
+
+  // HD verification results table
+  let hdVerificationTableHtml = '';
+  if (authMethod === 'hd_seed' && hasHDResults && state.manageHDVerificationResults!.length > 0) {
+    hdVerificationTableHtml = renderHDVerificationTableHtml(state.manageHDVerificationResults!);
+  }
+
+  // Build auth section based on method
+  let authSectionHtml = '';
+  if (authMethod === 'wif') {
+    authSectionHtml = `
+      <div class="input-group">
+        <label class="input-label">Private Key (WIF)</label>
+        <input
+          type="password"
+          id="manage-private-key-input"
+          class="manage-input"
+          placeholder="Your private key in WIF format..."
+          value="${state.managePrivateKeyWif || ''}"
+        />
+        <p class="input-hint">Only MASTER level keys can modify identity keys</p>
+        ${wifKeyValidationHtml}
+      </div>
+    `;
+  } else {
+    const identityIndex = state.manageIdentityIndex ?? 0;
+    authSectionHtml = `
+      <div class="input-group">
+        <label class="input-label">Recovery Phrase (Mnemonic)</label>
+        <textarea
+          id="manage-mnemonic-input"
+          class="manage-input mnemonic-textarea"
+          placeholder="Enter your 12 or 24 word recovery phrase..."
+          rows="3"
+          ${isHDVerifying ? 'disabled' : ''}
+        >${state.manageMnemonic || ''}</textarea>
+        <p class="input-hint">Your BIP39 mnemonic used to derive identity keys</p>
+      </div>
+
+      <div class="input-group advanced-toggle">
+        <details>
+          <summary>Advanced Options</summary>
+          <div class="advanced-options">
+            <label class="input-label">Identity Index</label>
+            <input
+              type="number"
+              id="manage-identity-index-input"
+              class="manage-input small"
+              value="${identityIndex}"
+              min="0"
+              step="1"
+            />
+            <p class="input-hint">Default is 0. Only change if you used a custom identity index.</p>
+          </div>
+        </details>
+      </div>
+
+      ${hdStatusHtml}
+      ${hdVerificationTableHtml}
+    `;
   }
 
   form.innerHTML = `
@@ -1343,18 +1434,19 @@ function renderManageEnterIdentityStep(state: BridgeState): HTMLElement {
       ${identityStatusHtml}
     </div>
 
-    <div class="input-group">
-      <label class="input-label">Private Key (WIF)</label>
-      <input
-        type="password"
-        id="manage-private-key-input"
-        class="manage-input"
-        placeholder="Your private key in WIF format..."
-        value="${state.managePrivateKeyWif || ''}"
-      />
-      <p class="input-hint">Only MASTER level keys can modify identity keys</p>
-      ${keyValidationHtml}
+    <div class="auth-method-toggle">
+      <label class="toggle-label">Authentication Method:</label>
+      <div class="toggle-buttons">
+        <button type="button" id="auth-method-wif" class="toggle-btn ${authMethod === 'wif' ? 'active' : ''}">
+          Private Key (WIF)
+        </button>
+        <button type="button" id="auth-method-hd" class="toggle-btn ${authMethod === 'hd_seed' ? 'active' : ''}">
+          HD Seed (Mnemonic)
+        </button>
+      </div>
     </div>
+
+    ${authSectionHtml}
   `;
 
   div.appendChild(form);
@@ -1369,12 +1461,15 @@ function renderManageEnterIdentityStep(state: BridgeState): HTMLElement {
   backBtn.textContent = 'Back';
   navButtons.appendChild(backBtn);
 
-  // Continue button only enabled when key is validated
+  // Continue button enabled when:
+  // - WIF mode: hasValidatedKey
+  // - HD mode: hasHDSigningKey
+  const canContinue = authMethod === 'wif' ? hasValidatedKey : hasHDSigningKey;
   const continueBtn = document.createElement('button');
   continueBtn.id = 'manage-identity-continue-btn';
   continueBtn.className = 'primary-btn';
   continueBtn.textContent = 'Continue';
-  if (!hasValidatedKey) {
+  if (!canContinue) {
     continueBtn.setAttribute('disabled', 'true');
   }
   navButtons.appendChild(continueBtn);
@@ -1382,6 +1477,51 @@ function renderManageEnterIdentityStep(state: BridgeState): HTMLElement {
   div.appendChild(navButtons);
 
   return div;
+}
+
+/**
+ * Render HD verification results table as HTML string
+ */
+function renderHDVerificationTableHtml(results: import('../types.js').HDKeyMatchResult[]): string {
+  const matchedResults = results.filter(r => r.matched);
+  const unmatchedResults = results.filter(r => !r.matched);
+
+  let html = '<div class="hd-verification-table">';
+  html += '<h4>HD Key Verification Results</h4>';
+  html += '<table>';
+  html += '<thead><tr><th>Index</th><th>Path</th><th>Status</th><th>On-chain Key</th></tr></thead>';
+  html += '<tbody>';
+
+  for (const r of matchedResults) {
+    const levelName = r.matchedSecurityLevel !== undefined
+      ? getSecurityLevelName(r.matchedSecurityLevel)
+      : '';
+    const disabledTag = r.isDisabled ? ' <span class="disabled-tag">DISABLED</span>' : '';
+
+    html += `<tr class="matched">
+      <td>${r.keyIndex}</td>
+      <td><code>${escapeHtml(r.derivationPath)}</code></td>
+      <td class="match-status matched">Matched</td>
+      <td>Key #${r.matchedKeyId} (${levelName})${disabledTag}</td>
+    </tr>`;
+  }
+
+  // Show first few unmatched for context
+  for (const r of unmatchedResults.slice(0, 3)) {
+    html += `<tr class="unmatched">
+      <td>${r.keyIndex}</td>
+      <td><code>${escapeHtml(r.derivationPath)}</code></td>
+      <td class="match-status unmatched">Not on identity</td>
+      <td>-</td>
+    </tr>`;
+  }
+
+  if (unmatchedResults.length > 3) {
+    html += `<tr class="unmatched-more"><td colspan="4">...and ${unmatchedResults.length - 3} more unmatched indices</td></tr>`;
+  }
+
+  html += '</tbody></table></div>';
+  return html;
 }
 
 /**
@@ -1436,6 +1576,9 @@ function renderManageViewKeysStep(state: BridgeState): HTMLElement {
   existingTable.className = 'manage-keys-table';
 
   const identityKeys = state.manageIdentityKeys || [];
+  const isHDMode = state.manageAuthMethod === 'hd_seed';
+  const hdResults = state.manageHDVerificationResults || [];
+
   identityKeys.forEach((key) => {
     const row = document.createElement('div');
     row.className = 'manage-key-row';
@@ -1466,11 +1609,27 @@ function renderManageViewKeysStep(state: BridgeState): HTMLElement {
         </label>`;
     }
 
+    // Add derivation path column if in HD mode
+    let derivationPathHtml = '';
+    if (isHDMode) {
+      const hdMatch = hdResults.find(r => r.matched && r.matchedKeyId === key.id);
+      if (hdMatch) {
+        derivationPathHtml = `
+          <div class="key-derivation" title="${escapeHtml(hdMatch.derivationPath)}">
+            <code class="derivation-path">.../${hdMatch.keyIndex}'</code>
+          </div>
+        `;
+      } else {
+        derivationPathHtml = '<div class="key-derivation"><span class="no-hd">Non-HD</span></div>';
+      }
+    }
+
     row.innerHTML = `
       <div class="key-id">Key #${key.id}</div>
       <div class="key-type">${getKeyTypeName(key.type)}</div>
       <div class="key-purpose">${getKeyPurposeName(key.purpose)}</div>
       <div class="key-security">${getSecurityLevelName(key.securityLevel)}</div>
+      ${derivationPathHtml}
       <div class="key-disable-toggle">
         ${toggleContent}
       </div>
@@ -1499,6 +1658,18 @@ function renderManageViewKeysStep(state: BridgeState): HTMLElement {
     row.dataset.tempId = key.tempId;
 
     const allowedSecurityLevels = getAllowedSecurityLevels(key.purpose, false);
+
+    // Show derivation path if HD-derived
+    let hdDerivationHtml = '';
+    if (key.hdDerivation) {
+      hdDerivationHtml = `
+        <div class="add-key-derivation">
+          <span class="derivation-label">Path:</span>
+          <code class="derivation-path">${escapeHtml(key.hdDerivation.derivationPath)}</code>
+        </div>
+      `;
+    }
+
     row.innerHTML = `
       <div class="add-key-config">
         <select class="manage-key-type-select" data-temp-id="${key.tempId}">
@@ -1512,6 +1683,7 @@ function renderManageViewKeysStep(state: BridgeState): HTMLElement {
         </select>
         <button class="remove-manage-new-key-btn" data-temp-id="${key.tempId}">&times;</button>
       </div>
+      ${hdDerivationHtml}
       ${key.source === 'generate' && key.generatedKey ? `
         <div class="add-key-backup">
           <p class="backup-warning">Save this private key (WIF):</p>
@@ -1526,12 +1698,32 @@ function renderManageViewKeysStep(state: BridgeState): HTMLElement {
 
   addSection.appendChild(addKeysList);
 
-  // Add key button
-  const addKeyBtn = document.createElement('button');
-  addKeyBtn.id = 'add-manage-key-btn';
-  addKeyBtn.className = 'add-key-btn';
-  addKeyBtn.textContent = '+ Add New Key';
-  addSection.appendChild(addKeyBtn);
+  // Add key controls - different for HD mode vs WIF mode
+  const addKeyControls = document.createElement('div');
+  addKeyControls.className = 'add-key-controls';
+
+  if (isHDMode) {
+    // Calculate next available key index
+    const hdPendingCount = keysToAdd.filter(k => k.hdDerivation).length;
+    const baseMaxIndex = state.manageMaxKeyIndex ?? -1;
+    const nextIndex = baseMaxIndex + 1 + hdPendingCount;
+
+    addKeyControls.innerHTML = `
+      <div class="hd-add-key-row">
+        <label class="key-index-label">
+          Key Index:
+          <input type="number" id="manage-new-key-index" class="manage-input small key-index-input" value="${nextIndex}" min="0" step="1" />
+        </label>
+        <button id="add-manage-key-btn" class="add-key-btn">+ Add Key at Index ${nextIndex}</button>
+      </div>
+      <p class="input-hint">The key will be derived at the specified index. Default: next available.</p>
+    `;
+  } else {
+    addKeyControls.innerHTML = `
+      <button id="add-manage-key-btn" class="add-key-btn">+ Add New Key</button>
+    `;
+  }
+  addSection.appendChild(addKeyControls);
 
   div.appendChild(addSection);
 

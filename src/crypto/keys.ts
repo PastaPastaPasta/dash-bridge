@@ -1,6 +1,6 @@
 import * as secp256k1 from '@noble/secp256k1';
 import { randomBytes } from '@noble/hashes/utils';
-import type { KeyPair, IdentityKeyConfig, KeyType, KeyPurpose, SecurityLevel, IdentityPublicKeyInfo } from '../types.js';
+import type { KeyPair, IdentityKeyConfig, KeyType, KeyPurpose, SecurityLevel, IdentityPublicKeyInfo, HDKeyMatchResult } from '../types.js';
 import { hash160 } from './hash.js';
 import { bytesToHex } from '../utils/hex.js';
 import { privateKeyToWif, wifToPrivateKey } from '../utils/wif.js';
@@ -316,4 +316,97 @@ export function getPurposeName(purpose: number): string {
  */
 export function isPurposeAllowedForDpns(purpose: number): boolean {
   return purpose === 0;
+}
+
+/**
+ * Verify HD-derived keys against identity's on-chain public keys.
+ * Derives keys at indices 0 through maxIndicesToCheck-1 and compares against identity keys.
+ *
+ * @param mnemonic - BIP39 mnemonic to derive keys from
+ * @param identityPublicKeys - Fetched identity keys from network
+ * @param network - Network for derivation
+ * @param maxIndicesToCheck - Maximum key indices to check (default 10)
+ * @param identityIndex - Identity index for derivation (default 0)
+ * @returns Array of match results with derivation paths
+ */
+export function verifyHDKeysAgainstIdentity(
+  mnemonic: string,
+  identityPublicKeys: IdentityPublicKeyInfo[],
+  network: 'testnet' | 'mainnet',
+  maxIndicesToCheck: number = 10,
+  identityIndex: number = 0
+): HDKeyMatchResult[] {
+  const results: HDKeyMatchResult[] = [];
+
+  // Derive keys at indices 0 through maxIndicesToCheck-1
+  for (let keyIndex = 0; keyIndex < maxIndicesToCheck; keyIndex++) {
+    const { publicKey, derivationPath } = deriveIdentityKeyHD(
+      mnemonic,
+      keyIndex,
+      network,
+      identityIndex
+    );
+
+    const publicKeyHex = bytesToHex(publicKey);
+    const publicKeyHash = hash160(publicKey);
+
+    // Try to match against identity keys
+    let matched = false;
+    let matchedKeyId: number | undefined;
+    let matchedSecurityLevel: number | undefined;
+    let matchedPurpose: number | undefined;
+    let isDisabled: boolean | undefined;
+
+    for (const identityKey of identityPublicKeys) {
+      // Type 0 = ECDSA_SECP256K1 (33-byte compressed pubkey)
+      // Type 2 = ECDSA_HASH160 (20-byte hash160)
+      if (identityKey.type === 0) {
+        if (bytesEqual(publicKey, identityKey.data)) {
+          matched = true;
+          matchedKeyId = identityKey.id;
+          matchedSecurityLevel = identityKey.securityLevel;
+          matchedPurpose = identityKey.purpose;
+          isDisabled = identityKey.isDisabled;
+          break;
+        }
+      } else if (identityKey.type === 2) {
+        if (bytesEqual(publicKeyHash, identityKey.data)) {
+          matched = true;
+          matchedKeyId = identityKey.id;
+          matchedSecurityLevel = identityKey.securityLevel;
+          matchedPurpose = identityKey.purpose;
+          isDisabled = identityKey.isDisabled;
+          break;
+        }
+      }
+    }
+
+    results.push({
+      keyIndex,
+      derivationPath,
+      matched,
+      matchedKeyId,
+      matchedSecurityLevel,
+      matchedPurpose,
+      isDisabled,
+      publicKeyHex,
+    });
+  }
+
+  return results;
+}
+
+/**
+ * Find the best signing key from HD verification results.
+ * Returns the first MASTER-level matched key that is not disabled, or null if none found.
+ */
+export function findHDSigningKey(
+  verificationResults: HDKeyMatchResult[]
+): HDKeyMatchResult | null {
+  // Find first MASTER (securityLevel=0) key that matched and is not disabled
+  return verificationResults.find(
+    r => r.matched &&
+         r.matchedSecurityLevel === 0 &&
+         !r.isDisabled
+  ) || null;
 }

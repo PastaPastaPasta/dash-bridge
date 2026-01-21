@@ -59,6 +59,15 @@ export {
   resetManageState,
   resetManageStateAndRefresh,
   setManageBackToEntry,
+  // Identity Management HD mode state functions
+  setManageAuthMethod,
+  setManageMnemonic,
+  setManageIdentityIndex,
+  setManageHDVerifying,
+  setManageHDVerificationResults,
+  setManageHDVerificationError,
+  setManageHDKeyValidated,
+  addManageNewKeyFromHD,
 } from './state.js';
 
 export { generateQRCodeDataUrl, createQRCodeElement, renderQRCodeToCanvas } from './qrcode.js';

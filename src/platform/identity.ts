@@ -1,6 +1,7 @@
 import { EvoSDK } from '@dashevo/evo-sdk';
 import { sha256 } from '@noble/hashes/sha256';
 import { ripemd160 } from '@noble/hashes/ripemd160';
+import * as secp256k1 from '@noble/secp256k1';
 import type { PublicKeyInfo, IdentityKeyConfig } from '../types.js';
 import { withRetry, type RetryOptions } from '../utils/retry.js';
 
@@ -250,14 +251,35 @@ export async function updateIdentity(
     console.log('Adding', addPublicKeys.length, 'keys, disabling', disablePublicKeyIds.length, 'keys');
 
     // Format keys for SDK
-    // For ECDSA_SECP256K1 keys: just pass privateKeyHex, SDK derives public key
-    // For ECDSA_HASH160 keys: need to pass 'data' with 20-byte hash160
+    // identity_update requires pre-computed 'data' field (unlike identity_create which accepts privateKeyHex)
+    // For ECDSA_SECP256K1 keys: derive compressed public key and pass as base64 'data'
+    // For ECDSA_HASH160 keys: compute hash160 of public key and pass as base64 'data'
     const formattedAddKeys = addPublicKeys.map(key => {
       const isHash160Type = key.keyType === 'ECDSA_HASH160';
+      const isSecp256k1Type = key.keyType === 'ECDSA_SECP256K1';
 
-      if (isHash160Type && key.publicKeyHex) {
-        // For HASH160 type, compute hash160 and pass as 'data'
-        const pubKeyBytes = new Uint8Array(key.publicKeyHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
+      if (isSecp256k1Type && key.privateKeyHex) {
+        // For SECP256K1 type, derive compressed public key from private key
+        const privKeyBytes = new Uint8Array(key.privateKeyHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
+        const pubKeyBytes = secp256k1.getPublicKey(privKeyBytes, true); // compressed = true
+        const dataBase64 = btoa(String.fromCharCode(...pubKeyBytes));
+
+        return {
+          keyType: key.keyType,
+          purpose: key.purpose,
+          securityLevel: key.securityLevel,
+          data: dataBase64,
+        };
+      } else if (isHash160Type && (key.privateKeyHex || key.publicKeyHex)) {
+        // For HASH160 type, compute hash160 of the public key
+        let pubKeyBytes: Uint8Array;
+        if (key.publicKeyHex) {
+          pubKeyBytes = new Uint8Array(key.publicKeyHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
+        } else {
+          // Derive public key from private key
+          const privKeyBytes = new Uint8Array(key.privateKeyHex!.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
+          pubKeyBytes = secp256k1.getPublicKey(privKeyBytes, true);
+        }
         const hash160Bytes = hash160(pubKeyBytes);
         const dataBase64 = btoa(String.fromCharCode(...hash160Bytes));
 
@@ -267,14 +289,16 @@ export async function updateIdentity(
           securityLevel: key.securityLevel,
           data: dataBase64,
         };
-      } else {
-        // For SECP256K1 and other types, just pass privateKeyHex - SDK derives pubkey
+      } else if (key.publicKeyBase64) {
+        // Pre-computed base64 data provided directly
         return {
           keyType: key.keyType,
           purpose: key.purpose,
           securityLevel: key.securityLevel,
-          ...(key.privateKeyHex ? { privateKeyHex: key.privateKeyHex } : {}),
+          data: key.publicKeyBase64,
         };
+      } else {
+        throw new Error(`Key requires privateKeyHex, publicKeyHex, or publicKeyBase64 for identity update`);
       }
     });
 
