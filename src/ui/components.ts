@@ -9,7 +9,7 @@ import { getAssetLockDerivationPath } from '../crypto/hd.js';
 
 // Available options for key configuration
 const KEY_TYPES: KeyType[] = ['ECDSA_SECP256K1', 'ECDSA_HASH160'];
-const KEY_PURPOSES: KeyPurpose[] = ['AUTHENTICATION', 'TRANSFER', 'VOTING', 'OWNER'];
+const KEY_PURPOSES: KeyPurpose[] = ['AUTHENTICATION', 'ENCRYPTION', 'TRANSFER', 'VOTING', 'OWNER'];
 const SECURITY_LEVELS: SecurityLevel[] = ['MASTER', 'CRITICAL', 'HIGH', 'MEDIUM'];
 
 /**
