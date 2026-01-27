@@ -983,3 +983,64 @@ export function setManageBackToEntry(state: BridgeState): BridgeState {
     manageKeyIdsToDisable: [],
   };
 }
+
+// ============================================================================
+// Faucet State Functions
+// ============================================================================
+
+/**
+ * Set faucet status to solving proof of work
+ */
+export function setFaucetSolvingPow(state: BridgeState): BridgeState {
+  return {
+    ...state,
+    faucetRequestStatus: 'solving_pow',
+    faucetError: undefined,
+  };
+}
+
+/**
+ * Set faucet status to requesting funds
+ */
+export function setFaucetRequesting(state: BridgeState): BridgeState {
+  return {
+    ...state,
+    faucetRequestStatus: 'requesting',
+    faucetError: undefined,
+  };
+}
+
+/**
+ * Set faucet request success with txid
+ */
+export function setFaucetSuccess(state: BridgeState, txid: string): BridgeState {
+  return {
+    ...state,
+    faucetRequestStatus: 'success',
+    faucetTxid: txid,
+    faucetError: undefined,
+  };
+}
+
+/**
+ * Set faucet request error
+ */
+export function setFaucetError(state: BridgeState, error: string): BridgeState {
+  return {
+    ...state,
+    faucetRequestStatus: 'error',
+    faucetError: error,
+  };
+}
+
+/**
+ * Reset faucet state to idle
+ */
+export function resetFaucetState(state: BridgeState): BridgeState {
+  return {
+    ...state,
+    faucetRequestStatus: 'idle',
+    faucetTxid: undefined,
+    faucetError: undefined,
+  };
+}

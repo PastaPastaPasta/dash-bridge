@@ -66,7 +66,17 @@ import {
   resetManageState,
   resetManageStateAndRefresh,
   setManageBackToEntry,
+  // Faucet state functions
+  setFaucetSolvingPow,
+  setFaucetRequesting,
+  setFaucetSuccess,
+  setFaucetError,
 } from './ui/index.js';
+import {
+  getFaucetStatus,
+  solveCap,
+  requestTestnetFunds,
+} from './api/faucet.js';
 import {
   checkMultipleAvailability,
   registerMultipleNames,
@@ -231,6 +241,12 @@ function setupEventListeners(container: HTMLElement) {
   const recheckBtn = container.querySelector('#recheck-deposit-btn');
   if (recheckBtn) {
     recheckBtn.addEventListener('click', recheckDeposit);
+  }
+
+  // Faucet request button (testnet only)
+  const faucetBtn = container.querySelector('#request-faucet-btn');
+  if (faucetBtn) {
+    faucetBtn.addEventListener('click', requestFaucetFunds);
   }
 
   // Copy buttons
@@ -1378,6 +1394,65 @@ async function startManageUpdate() {
       success: false,
       error: errorMessage,
     }));
+  }
+}
+
+// ============================================================================
+// Faucet Functions
+// ============================================================================
+
+/**
+ * Request testnet funds from the faucet
+ */
+async function requestFaucetFunds() {
+  const network = getNetwork(state.network);
+
+  // Only available on testnet
+  if (!network.faucetBaseUrl || !state.depositAddress) {
+    return;
+  }
+
+  // Prevent duplicate requests
+  if (state.faucetRequestStatus === 'solving_pow' ||
+      state.faucetRequestStatus === 'requesting') {
+    return;
+  }
+
+  try {
+    // Step 1: Check if CAP is required
+    const status = await getFaucetStatus(network.faucetBaseUrl);
+
+    let capToken: string | undefined;
+    if (status.capEndpoint) {
+      // Step 2: Solve proof-of-work
+      updateState(setFaucetSolvingPow(state));
+
+      try {
+        capToken = await solveCap(status.capEndpoint);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Proof of work failed';
+        updateState(setFaucetError(state, message));
+        return;
+      }
+    }
+
+    // Step 3: Request funds
+    updateState(setFaucetRequesting(state));
+
+    const result = await requestTestnetFunds(
+      network.faucetBaseUrl,
+      state.depositAddress,
+      1.0,  // 1 DASH
+      capToken
+    );
+
+    updateState(setFaucetSuccess(state, result.txid));
+    // Existing UTXO polling will detect incoming funds
+
+  } catch (error) {
+    console.error('Faucet request error:', error);
+    const message = error instanceof Error ? error.message : 'Failed to connect to faucet';
+    updateState(setFaucetError(state, message));
   }
 }
 

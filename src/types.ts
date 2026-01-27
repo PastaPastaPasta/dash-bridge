@@ -263,4 +263,12 @@ export interface BridgeState {
   manageUpdateResult?: { success: boolean; error?: string };
   /** Manage: key validation error message */
   manageKeyValidationError?: string;
+
+  // Faucet request state
+  /** Current status of faucet request */
+  faucetRequestStatus?: 'idle' | 'solving_pow' | 'requesting' | 'success' | 'error';
+  /** Transaction ID from successful faucet request */
+  faucetTxid?: string;
+  /** Error message from failed faucet request */
+  faucetError?: string;
 }

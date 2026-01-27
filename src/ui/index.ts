@@ -59,6 +59,12 @@ export {
   resetManageState,
   resetManageStateAndRefresh,
   setManageBackToEntry,
+  // Faucet state functions
+  setFaucetSolvingPow,
+  setFaucetRequesting,
+  setFaucetSuccess,
+  setFaucetError,
+  resetFaucetState,
 } from './state.js';
 
 export { generateQRCodeDataUrl, createQRCodeElement, renderQRCodeToCanvas } from './qrcode.js';

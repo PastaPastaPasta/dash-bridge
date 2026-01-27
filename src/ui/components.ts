@@ -459,6 +459,56 @@ function renderDepositStep(state: BridgeState): HTMLElement {
 
   div.appendChild(addressSection);
 
+  // Faucet section (testnet only)
+  if (state.network === 'testnet' && state.depositAddress) {
+    const faucetSection = document.createElement('div');
+    faucetSection.className = 'faucet-section';
+
+    const faucetStatus = state.faucetRequestStatus || 'idle';
+
+    if (faucetStatus === 'success' && state.faucetTxid) {
+      // Success state
+      const truncatedTxid = state.faucetTxid.length > 16
+        ? `${state.faucetTxid.slice(0, 8)}...${state.faucetTxid.slice(-8)}`
+        : state.faucetTxid;
+      faucetSection.innerHTML = `
+        <div class="faucet-success">
+          <span class="faucet-checkmark">&#10003;</span>
+          <span>1 tDASH sent!</span>
+          <code class="faucet-txid" title="${state.faucetTxid}">${truncatedTxid}</code>
+        </div>
+      `;
+    } else if (faucetStatus === 'solving_pow') {
+      // Solving proof of work
+      faucetSection.innerHTML = `
+        <div class="faucet-loading">
+          <div class="faucet-spinner"></div>
+          <span>Solving proof of work...</span>
+        </div>
+      `;
+    } else if (faucetStatus === 'requesting') {
+      // Requesting funds
+      faucetSection.innerHTML = `
+        <div class="faucet-loading">
+          <div class="faucet-spinner"></div>
+          <span>Sending funds...</span>
+        </div>
+      `;
+    } else {
+      // Idle or error state - show button
+      let errorHtml = '';
+      if (faucetStatus === 'error' && state.faucetError) {
+        errorHtml = `<p class="faucet-error">${escapeHtml(state.faucetError)}</p>`;
+      }
+      faucetSection.innerHTML = `
+        <button id="request-faucet-btn" class="faucet-btn">Request Testnet Funds</button>
+        ${errorHtml}
+      `;
+    }
+
+    div.appendChild(faucetSection);
+  }
+
   // Recheck section only shown after timeout
   if (state.step === 'detecting_deposit' && state.depositTimedOut) {
     const recheckSection = document.createElement('div');
