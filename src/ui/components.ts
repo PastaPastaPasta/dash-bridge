@@ -9,7 +9,7 @@ import { getAssetLockDerivationPath } from '../crypto/hd.js';
 
 // Available options for key configuration
 const KEY_TYPES: KeyType[] = ['ECDSA_SECP256K1', 'ECDSA_HASH160'];
-const KEY_PURPOSES: KeyPurpose[] = ['AUTHENTICATION', 'TRANSFER', 'VOTING', 'OWNER'];
+const KEY_PURPOSES: KeyPurpose[] = ['AUTHENTICATION', 'ENCRYPTION', 'TRANSFER', 'VOTING', 'OWNER'];
 const SECURITY_LEVELS: SecurityLevel[] = ['MASTER', 'CRITICAL', 'HIGH', 'MEDIUM'];
 
 /**
@@ -252,7 +252,7 @@ function renderConfigureKeysStep(state: BridgeState): HTMLElement {
           ${KEY_TYPES.map((t) => `<option value="${t}" ${t === key.keyType ? 'selected' : ''}>${t.replace('ECDSA_', '')}</option>`).join('')}
         </select>
         <select class="key-purpose-select" data-key-id="${key.id}">
-          ${KEY_PURPOSES.map((p) => `<option value="${p}" ${p === key.purpose ? 'selected' : ''}>${p.substring(0, 6)}</option>`).join('')}
+          ${KEY_PURPOSES.map((p) => `<option value="${p}" ${p === key.purpose ? 'selected' : ''}>${p}</option>`).join('')}
         </select>
         <select class="key-security-select" data-key-id="${key.id}">
           ${allowedSecurityLevels.map((s) => `<option value="${s}" ${s === key.securityLevel ? 'selected' : ''}>${s}</option>`).join('')}
@@ -1587,7 +1587,7 @@ function renderManageViewKeysStep(state: BridgeState): HTMLElement {
           ${KEY_TYPES.map((t) => `<option value="${t}" ${t === key.keyType ? 'selected' : ''}>${t.replace('ECDSA_', '')}</option>`).join('')}
         </select>
         <select class="manage-key-purpose-select" data-temp-id="${key.tempId}">
-          ${KEY_PURPOSES.map((p) => `<option value="${p}" ${p === key.purpose ? 'selected' : ''}>${p.substring(0, 6)}</option>`).join('')}
+          ${KEY_PURPOSES.map((p) => `<option value="${p}" ${p === key.purpose ? 'selected' : ''}>${p}</option>`).join('')}
         </select>
         <select class="manage-key-security-select" data-temp-id="${key.tempId}">
           ${allowedSecurityLevels.map((s) => `<option value="${s}" ${s === key.securityLevel ? 'selected' : ''}>${s}</option>`).join('')}
