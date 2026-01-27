@@ -252,7 +252,7 @@ function renderConfigureKeysStep(state: BridgeState): HTMLElement {
           ${KEY_TYPES.map((t) => `<option value="${t}" ${t === key.keyType ? 'selected' : ''}>${t.replace('ECDSA_', '')}</option>`).join('')}
         </select>
         <select class="key-purpose-select" data-key-id="${key.id}">
-          ${KEY_PURPOSES.map((p) => `<option value="${p}" ${p === key.purpose ? 'selected' : ''}>${p.substring(0, 6)}</option>`).join('')}
+          ${KEY_PURPOSES.map((p) => `<option value="${p}" ${p === key.purpose ? 'selected' : ''}>${p}</option>`).join('')}
         </select>
         <select class="key-security-select" data-key-id="${key.id}">
           ${allowedSecurityLevels.map((s) => `<option value="${s}" ${s === key.securityLevel ? 'selected' : ''}>${s}</option>`).join('')}
@@ -1518,7 +1518,7 @@ function renderManageViewKeysStep(state: BridgeState): HTMLElement {
           ${KEY_TYPES.map((t) => `<option value="${t}" ${t === key.keyType ? 'selected' : ''}>${t.replace('ECDSA_', '')}</option>`).join('')}
         </select>
         <select class="manage-key-purpose-select" data-temp-id="${key.tempId}">
-          ${KEY_PURPOSES.map((p) => `<option value="${p}" ${p === key.purpose ? 'selected' : ''}>${p.substring(0, 6)}</option>`).join('')}
+          ${KEY_PURPOSES.map((p) => `<option value="${p}" ${p === key.purpose ? 'selected' : ''}>${p}</option>`).join('')}
         </select>
         <select class="manage-key-security-select" data-temp-id="${key.tempId}">
           ${allowedSecurityLevels.map((s) => `<option value="${s}" ${s === key.securityLevel ? 'selected' : ''}>${s}</option>`).join('')}
