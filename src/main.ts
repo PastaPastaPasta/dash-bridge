@@ -1447,7 +1447,22 @@ async function requestFaucetFunds() {
     );
 
     updateState(setFaucetSuccess(state, result.txid));
-    // Existing UTXO polling will detect incoming funds
+
+    // Quick UTXO check 250ms after faucet sends funds
+    setTimeout(async () => {
+      if (state.depositAddress) {
+        try {
+          const utxos = await insightClient.getUTXOs(state.depositAddress);
+          const minAmount = 300000; // 0.003 DASH minimum
+          const sufficientUtxo = utxos.find(u => u.satoshis >= minAmount);
+          if (sufficientUtxo) {
+            updateState(setUtxoDetected(state, sufficientUtxo));
+          }
+        } catch {
+          // Ignore - regular polling will catch it
+        }
+      }
+    }, 250);
 
   } catch (error) {
     console.error('Faucet request error:', error);
