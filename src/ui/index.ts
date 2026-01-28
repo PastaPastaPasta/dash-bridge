@@ -12,6 +12,8 @@ export {
   setInstantLockReceived,
   setIdentityRegistered,
   setError,
+  setRetryStatus,
+  clearRetryStatus,
   setDepositTimedOut,
   setNetwork,
   getStepDescription,

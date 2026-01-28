@@ -339,7 +339,8 @@ export async function registerMultipleNames(
   publicKeyId: number,
   privateKeyWif: string,
   network: 'testnet' | 'mainnet',
-  onProgress?: (current: number, total: number, label: string) => void
+  onProgress?: (current: number, total: number, label: string) => void,
+  retryOptions?: RetryOptions
 ): Promise<DpnsRegistrationResult[]> {
   const results: DpnsRegistrationResult[] = [];
 
@@ -355,7 +356,9 @@ export async function registerMultipleNames(
       identityId,
       publicKeyId,
       privateKeyWif,
-      network
+      network,
+      undefined, // onPreorder
+      retryOptions
     );
 
     results.push({

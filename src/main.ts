@@ -8,6 +8,11 @@ import { buildInstantAssetLockProof } from './proof/index.js';
 import { registerIdentity, topUpIdentity, updateIdentity, AddKeyConfig } from './platform/index.js';
 import { privateKeyToWif, bytesToHex } from './utils/index.js';
 import {
+  PLATFORM_RETRY_OPTIONS,
+  extractErrorMessage,
+  createRetryOptionsWithCallback,
+} from './utils/retry.js';
+import {
   createInitialState,
   setStep,
   setKeyPairs,
@@ -21,6 +26,8 @@ import {
   setInstantLockReceived,
   setIdentityRegistered,
   setError,
+  setRetryStatus,
+  clearRetryStatus,
   setDepositTimedOut,
   setNetwork,
   updateIdentityKey,
@@ -931,11 +938,24 @@ function showValidationError(message: string): void {
 }
 
 /**
+ * Create retry options with UI feedback callback
+ *
+ * This creates retry options that update the retry status in the UI
+ * when retries are happening, giving users visibility into the retry process.
+ */
+function createRetryOptionsWithUIFeedback() {
+  return createRetryOptionsWithCallback((status) => {
+    updateState(setRetryStatus(state, status));
+  }, PLATFORM_RETRY_OPTIONS);
+}
+
+/**
  * Start the top-up process
  */
 async function startTopUp() {
   try {
     const network = getNetwork(state.network);
+    const retryOptions = createRetryOptionsWithUIFeedback();
 
     // Step 1: Generate random one-time key pair (NOT HD-derived)
     updateState(setStep(state, 'generating_keys'));
@@ -1023,18 +1043,23 @@ async function startTopUp() {
       network
     );
 
+    // Use retry options with UI feedback for the Platform operation
     await topUpIdentity(
       state.targetIdentityId!,
       assetLockProof,
       assetLockPrivateKeyWif,
-      state.network
+      state.network,
+      retryOptions
     );
 
-    updateState(setTopUpComplete(state));
+    // Clear retry status on success
+    updateState(clearRetryStatus(setTopUpComplete(state)));
 
   } catch (error) {
     console.error('Top-up error:', error);
-    updateState(setError(state, error instanceof Error ? error : new Error(String(error))));
+    // Extract error message properly for various error types
+    const errorMessage = extractErrorMessage(error);
+    updateState(setError(state, new Error(errorMessage)));
   }
 }
 
@@ -1044,6 +1069,7 @@ async function startTopUp() {
 async function startBridge() {
   try {
     const network = getNetwork(state.network);
+    const retryOptions = createRetryOptionsWithUIFeedback();
 
     // Ensure mnemonic exists
     if (!state.mnemonic) {
@@ -1138,14 +1164,17 @@ async function startBridge() {
       network
     );
 
+    // Use retry options with UI feedback for the Platform operation
     const result = await registerIdentity(
       assetLockProof,
       assetLockPrivateKeyWif,
       state.identityKeys,
-      state.network
+      state.network,
+      retryOptions
     );
 
-    updateState(setIdentityRegistered(state, result.identityId));
+    // Clear retry status on success
+    updateState(clearRetryStatus(setIdentityRegistered(state, result.identityId)));
 
     // Auto-download final key backup on "Save your keys" page
     // This backup includes the identity ID in the filename
@@ -1154,7 +1183,9 @@ async function startBridge() {
 
   } catch (error) {
     console.error('Bridge error:', error);
-    updateState(setError(state, error instanceof Error ? error : new Error(String(error))));
+    // Extract error message properly for various error types
+    const errorMessage = extractErrorMessage(error);
+    updateState(setError(state, new Error(errorMessage)));
   }
 }
 
@@ -1190,6 +1221,7 @@ async function recheckDeposit() {
   try {
     const network = getNetwork(state.network);
     const assetLockKeyPair = state.assetLockKeyPair!;
+    const retryOptions = createRetryOptionsWithUIFeedback();
 
     updateState(setUtxoDetected(state, utxo));
 
@@ -1245,21 +1277,26 @@ async function recheckDeposit() {
       network
     );
 
+    // Use retry options with UI feedback for the Platform operation
     const result = await registerIdentity(
       assetLockProof,
       assetLockPrivateKeyWif,
       state.identityKeys,
-      state.network
+      state.network,
+      retryOptions
     );
 
-    updateState(setIdentityRegistered(state, result.identityId));
+    // Clear retry status on success
+    updateState(clearRetryStatus(setIdentityRegistered(state, result.identityId)));
 
     // Auto-download final key backup on "Save your keys" page
     downloadKeyBackup(state);
 
   } catch (error) {
     console.error('Bridge error:', error);
-    updateState(setError(state, error instanceof Error ? error : new Error(String(error))));
+    // Extract error message properly for various error types
+    const errorMessage = extractErrorMessage(error);
+    updateState(setError(state, new Error(errorMessage)));
   }
 }
 
@@ -1282,15 +1319,18 @@ async function startDpnsCheck() {
     // Transition to checking state
     updateState(setDpnsChecking(state));
 
-    // Check availability for all valid usernames
-    const results = await checkMultipleAvailability(validUsernames, state.network);
+    const retryOptions = createRetryOptionsWithUIFeedback();
 
-    // Update state with results
-    updateState(setDpnsAvailability(state, results));
+    // Check availability for all valid usernames
+    const results = await checkMultipleAvailability(validUsernames, state.network, retryOptions);
+
+    // Clear retry status and update state with results
+    updateState(clearRetryStatus(setDpnsAvailability(state, results)));
 
   } catch (error) {
     console.error('DPNS check error:', error);
-    updateState(setError(state, error instanceof Error ? error : new Error(String(error))));
+    const errorMessage = extractErrorMessage(error);
+    updateState(setError(state, new Error(errorMessage)));
   }
 }
 
@@ -1322,6 +1362,8 @@ async function startDpnsRegistration() {
     // Transition to registering state
     updateState(setDpnsRegistering(state));
 
+    const retryOptions = createRetryOptionsWithUIFeedback();
+
     // Register all available usernames
     const results = await registerMultipleNames(
       availableUsernames,
@@ -1332,15 +1374,17 @@ async function startDpnsRegistration() {
       (current, total, label) => {
         console.log(`Registering ${label} (${current}/${total})...`);
         updateState(setDpnsRegistrationProgress(state, current - 1));
-      }
+      },
+      retryOptions
     );
 
-    // Update state with results
-    updateState(setDpnsResults(state, results));
+    // Clear retry status and update state with results
+    updateState(clearRetryStatus(setDpnsResults(state, results)));
 
   } catch (error) {
     console.error('DPNS registration error:', error);
-    updateState(setError(state, error instanceof Error ? error : new Error(String(error))));
+    const errorMessage = extractErrorMessage(error);
+    updateState(setError(state, new Error(errorMessage)));
   }
 }
 
@@ -1385,23 +1429,25 @@ async function startManageUpdate() {
       return;
     }
 
-    // Execute update
+    const retryOptions = createRetryOptionsWithUIFeedback();
+
+    // Execute update with retry options
     const result = await updateIdentity(
       state.targetIdentityId,
       state.managePrivateKeyWif,
       addPublicKeys,
       disablePublicKeyIds,
-      state.network
+      state.network,
+      retryOptions
     );
 
-    updateState(setManageComplete(state, result));
+    // Clear retry status and update state with result
+    updateState(clearRetryStatus(setManageComplete(state, result)));
 
   } catch (error) {
     console.error('Identity update error:', error);
-    // WasmSdkError is not a standard Error, so check for message property
-    const errorMessage = (error && typeof error === 'object' && 'message' in error)
-      ? String((error as { message: unknown }).message)
-      : (error instanceof Error ? error.message : String(error));
+    // Use extractErrorMessage for consistent error handling
+    const errorMessage = extractErrorMessage(error);
     updateState(setManageComplete(state, {
       success: false,
       error: errorMessage,

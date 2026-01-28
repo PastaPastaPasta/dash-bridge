@@ -6,6 +6,7 @@ import { privateKeyToWif } from '../utils/wif.js';
 import { bytesToHex } from '../utils/hex.js';
 import { getNetwork } from '../config.js';
 import { getAssetLockDerivationPath } from '../crypto/hd.js';
+import { extractErrorMessage } from '../utils/retry.js';
 
 // Available options for key configuration
 const KEY_TYPES: KeyType[] = ['ECDSA_SECP256K1', 'ECDSA_HASH160'];
@@ -712,10 +713,13 @@ function renderErrorStep(state: BridgeState): HTMLElement {
   const div = document.createElement('div');
   div.className = 'error-step';
 
+  // Use extractErrorMessage to handle various error types including WASM SDK errors
+  const errorMessage = extractErrorMessage(state.error);
+
   div.innerHTML = `
     <div class="error-icon">❌</div>
     <h2>Error</h2>
-    <p class="error-message">${state.error?.message || 'An unknown error occurred'}</p>
+    <p class="error-message">${escapeHtml(errorMessage)}</p>
     <button id="retry-btn" class="secondary-btn">Try Again</button>
   `;
 

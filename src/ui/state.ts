@@ -10,6 +10,7 @@ import type {
   DpnsIdentitySource,
   IdentityPublicKeyInfo,
   ManageNewKeyConfig,
+  RetryStatus,
 } from '../types.js';
 import {
   generateDefaultIdentityKeysHD,
@@ -321,6 +322,28 @@ export function setError(state: BridgeState, error: Error): BridgeState {
     ...state,
     step: 'error',
     error,
+    // Clear retry status when we hit a final error
+    retryStatus: undefined,
+  };
+}
+
+/**
+ * Set retry status for showing retry indicator in UI
+ */
+export function setRetryStatus(state: BridgeState, status: RetryStatus): BridgeState {
+  return {
+    ...state,
+    retryStatus: status,
+  };
+}
+
+/**
+ * Clear retry status (called when operation succeeds or fails permanently)
+ */
+export function clearRetryStatus(state: BridgeState): BridgeState {
+  return {
+    ...state,
+    retryStatus: undefined,
   };
 }
 
