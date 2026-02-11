@@ -15,7 +15,7 @@ import {
   generateDefaultIdentityKeysHD,
   generateIdentityKeyFromMnemonic,
 } from '../crypto/keys.js';
-import { generateNewMnemonic } from '../crypto/hd.js';
+import { generateNewMnemonic, validateMnemonicPhrase } from '../crypto/hd.js';
 import { createEmptyUsernameEntry, createUsernameEntry } from '../platform/dpns.js';
 
 /**
@@ -107,6 +107,23 @@ export function setMode(state: BridgeState, mode: BridgeMode): BridgeState {
       manageKeyValidationError: undefined,
     };
   }
+}
+
+/**
+ * Set mnemonic (user-provided or generated) and re-derive all identity keys.
+ * Returns null if the mnemonic is invalid.
+ */
+export function setMnemonic(state: BridgeState, mnemonic: string): BridgeState | null {
+  const trimmed = mnemonic.trim().replace(/\s+/g, ' ');
+  if (!validateMnemonicPhrase(trimmed)) {
+    return null;
+  }
+
+  return {
+    ...state,
+    mnemonic: trimmed,
+    identityKeys: generateDefaultIdentityKeysHD(state.network, trimmed),
+  };
 }
 
 /**
