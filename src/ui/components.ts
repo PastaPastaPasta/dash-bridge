@@ -231,6 +231,37 @@ function renderConfigureKeysStep(state: BridgeState): HTMLElement {
   `;
   div.appendChild(reassurance);
 
+  // Mnemonic input section
+  const mnemonicSection = document.createElement('div');
+  mnemonicSection.className = 'mnemonic-input-section';
+
+  const mnemonicLabel = document.createElement('label');
+  mnemonicLabel.className = 'input-label';
+  mnemonicLabel.htmlFor = 'mnemonic-input';
+  mnemonicLabel.textContent = 'Recovery Phrase';
+  mnemonicSection.appendChild(mnemonicLabel);
+
+  const mnemonicTextarea = document.createElement('textarea');
+  mnemonicTextarea.id = 'mnemonic-input';
+  mnemonicTextarea.className = 'mnemonic-input';
+  mnemonicTextarea.rows = 2;
+  mnemonicTextarea.placeholder = 'Enter your own 12 or 24 word mnemonic, or use the generated one...';
+  mnemonicTextarea.value = state.mnemonic || '';
+  mnemonicSection.appendChild(mnemonicTextarea);
+
+  const mnemonicHint = document.createElement('p');
+  mnemonicHint.className = 'input-hint';
+  mnemonicHint.textContent = 'A new mnemonic was generated. Paste your own BIP39 mnemonic to create an identity for an existing wallet.';
+  mnemonicSection.appendChild(mnemonicHint);
+
+  // Validation status
+  const mnemonicStatus = document.createElement('p');
+  mnemonicStatus.id = 'mnemonic-validation-status';
+  mnemonicStatus.className = 'mnemonic-validation-status hidden';
+  mnemonicSection.appendChild(mnemonicStatus);
+
+  div.appendChild(mnemonicSection);
+
   // Key configuration section
   const keysSection = document.createElement('div');
   keysSection.className = 'keys-section';

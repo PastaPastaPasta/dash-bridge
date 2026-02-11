@@ -12,6 +12,7 @@ import {
   setStep,
   setKeyPairs,
   setMode,
+  setMnemonic,
   setTargetIdentityId,
   setOneTimeKeyPair,
   setTopUpComplete,
@@ -331,6 +332,42 @@ function setupEventListeners(container: HTMLElement) {
       updateState(updateIdentityKey(state, keyId, { securityLevel: target.value as SecurityLevel }));
     });
   });
+
+  // Mnemonic input (configure keys step)
+  const mnemonicInput = container.querySelector('#mnemonic-input') as HTMLTextAreaElement;
+  if (mnemonicInput) {
+    const applyMnemonic = () => {
+      const value = mnemonicInput.value;
+      const statusEl = container.querySelector('#mnemonic-validation-status');
+
+      // Skip if the value matches current mnemonic
+      if (value.trim().replace(/\s+/g, ' ') === state.mnemonic) {
+        if (statusEl) {
+          statusEl.classList.add('hidden');
+        }
+        return;
+      }
+
+      const newState = setMnemonic(state, value);
+      if (newState) {
+        if (statusEl) {
+          statusEl.classList.add('hidden');
+        }
+        updateState(newState);
+      } else if (value.trim().length > 0) {
+        // Show validation error
+        if (statusEl) {
+          statusEl.textContent = 'Invalid mnemonic. Enter a valid BIP39 phrase (12 or 24 words).';
+          statusEl.className = 'mnemonic-validation-status error';
+        }
+      }
+    };
+
+    mnemonicInput.addEventListener('blur', applyMnemonic);
+    mnemonicInput.addEventListener('paste', () => {
+      setTimeout(applyMnemonic, 50);
+    });
+  }
 
   // ============================================================================
   // DPNS Event Listeners
