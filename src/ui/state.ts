@@ -15,7 +15,7 @@ import {
   generateDefaultIdentityKeysHD,
   generateIdentityKeyFromMnemonic,
 } from '../crypto/keys.js';
-import { generateNewMnemonic } from '../crypto/hd.js';
+import { generateNewMnemonic, isValidMnemonic } from '../crypto/hd.js';
 import { createEmptyUsernameEntry, createUsernameEntry } from '../platform/dpns.js';
 
 /**
@@ -56,14 +56,15 @@ export function setKeyPairs(
  */
 export function setMode(state: BridgeState, mode: BridgeMode): BridgeState {
   if (mode === 'create') {
-    // Create mode: generate mnemonic and identity keys
-    const mnemonic = generateNewMnemonic(128);
+    // Create mode: go to mnemonic choice (generate new or import existing)
     return {
       ...state,
-      step: 'configure_keys',
+      step: 'mnemonic_input',
       mode,
-      mnemonic,
-      identityKeys: generateDefaultIdentityKeysHD(state.network, mnemonic),
+      mnemonic: undefined,
+      mnemonicImported: undefined,
+      mnemonicValidationError: undefined,
+      identityKeys: [],
       // Clear any top-up state
       targetIdentityId: undefined,
       isOneTimeKey: undefined,
@@ -107,6 +108,52 @@ export function setMode(state: BridgeState, mode: BridgeMode): BridgeState {
       manageKeyValidationError: undefined,
     };
   }
+}
+
+/**
+ * Generate a new mnemonic and transition to configure_keys
+ */
+export function setMnemonicGenerated(state: BridgeState): BridgeState {
+  const mnemonic = generateNewMnemonic(128);
+  return {
+    ...state,
+    step: 'configure_keys',
+    mnemonic,
+    mnemonicImported: false,
+    mnemonicValidationError: undefined,
+    identityKeys: generateDefaultIdentityKeysHD(state.network, mnemonic),
+  };
+}
+
+/**
+ * Validate and set an imported mnemonic, then transition to configure_keys.
+ * Returns state with validation error if mnemonic is invalid.
+ */
+export function setMnemonicImported(state: BridgeState, mnemonic: string): BridgeState {
+  const trimmed = mnemonic.trim().replace(/\s+/g, ' ');
+
+  if (!isValidMnemonic(trimmed)) {
+    const wordCount = trimmed.split(' ').length;
+    let errorMsg: string;
+    if (wordCount !== 12 && wordCount !== 24) {
+      errorMsg = `Expected 12 or 24 words, got ${wordCount}.`;
+    } else {
+      errorMsg = 'Invalid mnemonic: one or more words are not in the BIP39 wordlist, or the checksum is incorrect.';
+    }
+    return {
+      ...state,
+      mnemonicValidationError: errorMsg,
+    };
+  }
+
+  return {
+    ...state,
+    step: 'configure_keys',
+    mnemonic: trimmed,
+    mnemonicImported: true,
+    mnemonicValidationError: undefined,
+    identityKeys: generateDefaultIdentityKeysHD(state.network, trimmed),
+  };
 }
 
 /**
@@ -384,6 +431,7 @@ export function setDepositTimedOut(
 export function getStepDescription(step: BridgeStep): string {
   const descriptions: Record<BridgeStep, string> = {
     init: 'Ready to start',
+    mnemonic_input: 'Recovery phrase',
     configure_keys: 'Configure your keys',
     enter_identity: 'Top up identity',
     generating_keys: 'Setting up...',
@@ -420,6 +468,7 @@ export function getStepDescription(step: BridgeStep): string {
 export function getStepProgress(step: BridgeStep): number {
   const progress: Record<BridgeStep, number> = {
     init: 0,
+    mnemonic_input: 5,
     configure_keys: 10,
     enter_identity: 10,
     generating_keys: 20,
@@ -502,14 +551,15 @@ export function setDpnsIdentitySource(
   source: DpnsIdentitySource
 ): BridgeState {
   if (source === 'new') {
-    // Go to identity creation, but remember we're coming back to DPNS
-    const mnemonic = generateNewMnemonic(128);
+    // Go to mnemonic choice, then identity creation, then back to DPNS
     return {
       ...state,
-      step: 'configure_keys',
+      step: 'mnemonic_input',
       mode: 'create', // Switch to create mode temporarily
-      mnemonic,
-      identityKeys: generateDefaultIdentityKeysHD(state.network, mnemonic),
+      mnemonic: undefined,
+      mnemonicImported: undefined,
+      mnemonicValidationError: undefined,
+      identityKeys: [],
       dpnsIdentitySource: source,
       dpnsFromIdentityCreation: true, // Will return to DPNS after creation
     };

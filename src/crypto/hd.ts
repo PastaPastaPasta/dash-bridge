@@ -1,5 +1,5 @@
 import { HDKey } from '@scure/bip32';
-import { generateMnemonic, mnemonicToSeedSync } from '@scure/bip39';
+import { generateMnemonic, mnemonicToSeedSync, validateMnemonic } from '@scure/bip39';
 import { wordlist } from '@scure/bip39/wordlists/english.js';
 
 /**
@@ -42,6 +42,19 @@ export function getCoinType(network: 'testnet' | 'mainnet'): number {
  */
 export function generateNewMnemonic(strength: 128 | 256 = 128): string {
   return generateMnemonic(wordlist, strength);
+}
+
+/**
+ * Validate a BIP39 mnemonic phrase
+ * @param mnemonic - Space-separated mnemonic words
+ * @returns true if the mnemonic is valid (correct wordlist, checksum, 12 or 24 words)
+ */
+export function isValidMnemonic(mnemonic: string): boolean {
+  const wordCount = mnemonic.trim().split(/\s+/).length;
+  if (wordCount !== 12 && wordCount !== 24) {
+    return false;
+  }
+  return validateMnemonic(mnemonic.trim(), wordlist);
 }
 
 /**
