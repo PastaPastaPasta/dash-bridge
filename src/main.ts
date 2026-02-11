@@ -12,6 +12,8 @@ import {
   setStep,
   setKeyPairs,
   setMode,
+  setMnemonicGenerated,
+  setMnemonicImported,
   setTargetIdentityId,
   setOneTimeKeyPair,
   setTopUpComplete,
@@ -202,11 +204,51 @@ function setupEventListeners(container: HTMLElement) {
     });
   }
 
-  // Back button (configure keys or enter identity -> init)
+  // Back button (mnemonic input, configure keys, or enter identity -> previous step)
   const backBtn = container.querySelector('#back-btn');
   if (backBtn) {
     backBtn.addEventListener('click', () => {
-      updateState(setStep(state, 'init'));
+      if (state.step === 'configure_keys') {
+        updateState(setStep(state, 'mnemonic_input'));
+      } else if (state.step === 'mnemonic_input' && state.dpnsIdentitySource === 'new') {
+        updateState(setStep(state, 'dpns_choose_identity'));
+      } else {
+        updateState(setStep(state, 'init'));
+      }
+    });
+  }
+
+  // Mnemonic input step: Generate new
+  const mnemonicGenerateBtn = container.querySelector('#mnemonic-generate-btn');
+  if (mnemonicGenerateBtn) {
+    mnemonicGenerateBtn.addEventListener('click', () => {
+      updateState(setMnemonicGenerated(state));
+    });
+  }
+
+  // Mnemonic input step: Show import UI
+  const mnemonicImportBtn = container.querySelector('#mnemonic-import-btn');
+  if (mnemonicImportBtn) {
+    mnemonicImportBtn.addEventListener('click', () => {
+      const importSection = container.querySelector('#mnemonic-import-section');
+      if (importSection) {
+        importSection.classList.remove('hidden');
+      }
+      const choiceButtons = container.querySelector('#mnemonic-choice-buttons');
+      if (choiceButtons) {
+        (choiceButtons as HTMLElement).style.display = 'none';
+      }
+    });
+  }
+
+  // Mnemonic input step: Continue with imported mnemonic
+  const mnemonicImportContinueBtn = container.querySelector('#mnemonic-import-continue-btn');
+  if (mnemonicImportContinueBtn) {
+    mnemonicImportContinueBtn.addEventListener('click', () => {
+      const textarea = container.querySelector('#mnemonic-import-textarea') as HTMLTextAreaElement;
+      if (textarea) {
+        updateState(setMnemonicImported(state, textarea.value));
+      }
     });
   }
 

@@ -145,6 +145,7 @@ export interface ManageNewKeyConfig {
 
 export type BridgeStep =
   | 'init'
+  | 'mnemonic_input'      // Create: choose generate new or import existing mnemonic
   | 'configure_keys'
   | 'enter_identity'      // Top-up: user enters identity ID
   | 'generating_keys'
@@ -193,8 +194,12 @@ export interface BridgeState {
   mode: BridgeMode;
   /** Current network retry status (for displaying retry indicator) */
   retryStatus?: RetryStatus;
-  /** BIP39 mnemonic (12 words) for HD key derivation */
+  /** BIP39 mnemonic (12 or 24 words) for HD key derivation */
   mnemonic?: string;
+  /** Whether the mnemonic was imported (vs generated) */
+  mnemonicImported?: boolean;
+  /** Validation error message for imported mnemonic */
+  mnemonicValidationError?: string;
   assetLockKeyPair?: KeyPair;
   /** Configurable identity keys */
   identityKeys: IdentityKeyConfig[];
