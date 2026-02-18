@@ -86,6 +86,10 @@ export function render(state: BridgeState, container: HTMLElement): void {
       content.appendChild(renderEnterIdentityStep(state));
       break;
 
+    case 'enter_platform_address':
+      content.appendChild(renderEnterPlatformAddressStep(state));
+      break;
+
     case 'awaiting_deposit':
     case 'detecting_deposit':
       content.appendChild(renderDepositStep(state));
@@ -97,6 +101,7 @@ export function render(state: BridgeState, container: HTMLElement): void {
     case 'waiting_islock':
     case 'registering_identity':
     case 'topping_up':
+    case 'funding_address':
       content.appendChild(renderProcessingStep(state));
       break;
 
@@ -204,6 +209,10 @@ function renderInitStep(state: BridgeState): HTMLElement {
     <button id="mode-topup-btn" class="mode-btn secondary-btn">
       <span class="mode-label">Top Up Existing Identity</span>
       <span class="mode-desc">Add credits to an identity you already own</span>
+    </button>
+    <button id="mode-fund-address-btn" class="mode-btn secondary-btn">
+      <span class="mode-label">Fund Platform Address</span>
+      <span class="mode-desc">Send L1 DASH to a Platform address</span>
     </button>
     <button id="mode-dpns-btn" class="mode-btn secondary-btn">
       <span class="mode-label">Register Username</span>
@@ -343,17 +352,102 @@ function renderEnterIdentityStep(state: BridgeState): HTMLElement {
   return div;
 }
 
+function renderEnterPlatformAddressStep(state: BridgeState): HTMLElement {
+  const div = document.createElement('div');
+  div.className = 'enter-platform-address-step';
+
+  const headline = document.createElement('h2');
+  headline.className = 'fund-address-headline';
+  headline.textContent = 'Fund Platform Address';
+  div.appendChild(headline);
+
+  // Private key input
+  const inputSection = document.createElement('div');
+  inputSection.className = 'platform-address-input-section';
+
+  const keyGroup = document.createElement('div');
+  keyGroup.className = 'input-group';
+  keyGroup.innerHTML = `
+    <label class="input-label">Platform Address Private Key (WIF)</label>
+    <div class="password-input-wrapper">
+      <input
+        type="password"
+        id="platform-address-key-input"
+        class="platform-address-input"
+        placeholder="Enter your platform address private key in WIF format..."
+        value="${state.platformAddressPrivateKeyWif || ''}"
+      />
+      <button type="button" id="toggle-key-visibility-btn" class="toggle-visibility-btn" title="Show/hide key">Show</button>
+    </div>
+    <p class="input-hint">The private key for the Platform address you want to fund</p>
+  `;
+  inputSection.appendChild(keyGroup);
+
+  // Derived address display (shown after key is entered)
+  if (state.platformAddress) {
+    const addressDisplay = document.createElement('div');
+    addressDisplay.className = 'derived-address-display';
+    addressDisplay.innerHTML = `
+      <label class="input-label">Derived Platform Address</label>
+      <div class="address-display">
+        <code class="address">${state.platformAddress}</code>
+        <button class="copy-btn" data-copy="${state.platformAddress}">Copy</button>
+      </div>
+      <p class="input-hint success-hint">Confirm this is the address you want to fund</p>
+    `;
+    inputSection.appendChild(addressDisplay);
+  }
+
+  div.appendChild(inputSection);
+
+  // Validation message placeholder
+  const validationMsg = document.createElement('p');
+  validationMsg.id = 'platform-address-validation-msg';
+  validationMsg.className = 'validation-msg hidden';
+  div.appendChild(validationMsg);
+
+  // Navigation buttons
+  const navButtons = document.createElement('div');
+  navButtons.className = 'nav-buttons';
+
+  const backBtn = document.createElement('button');
+  backBtn.id = 'back-btn';
+  backBtn.className = 'secondary-btn';
+  backBtn.textContent = 'Back';
+  navButtons.appendChild(backBtn);
+
+  const continueBtn = document.createElement('button');
+  continueBtn.id = 'continue-fund-address-btn';
+  continueBtn.className = 'primary-btn';
+  continueBtn.textContent = 'Continue';
+  if (!state.platformAddress) {
+    continueBtn.setAttribute('disabled', 'true');
+  }
+  navButtons.appendChild(continueBtn);
+
+  div.appendChild(navButtons);
+
+  return div;
+}
+
 function renderDepositStep(state: BridgeState): HTMLElement {
   const div = document.createElement('div');
-  div.className = `deposit-step ${state.mode === 'topup' ? 'topup-deposit' : ''}`;
+  const isFundAddress = state.mode === 'fund_address';
+  div.className = `deposit-step ${(state.mode === 'topup' || isFundAddress) ? 'topup-deposit' : ''}`;
 
   const address = state.depositAddress || '';
-  const isTopUp = state.mode === 'topup';
+  const isTopUp = state.mode === 'topup' || isFundAddress;
 
   // Primary instruction - mode-aware headline
   const headline = document.createElement('h2');
   headline.className = 'deposit-headline';
-  if (isTopUp && state.targetIdentityId) {
+  if (isFundAddress && state.platformAddress) {
+    // Fund address mode: show truncated platform address
+    const truncatedAddr = state.platformAddress.length > 20
+      ? `${state.platformAddress.slice(0, 12)}...${state.platformAddress.slice(-6)}`
+      : state.platformAddress;
+    headline.innerHTML = `Fund <code class="inline-id">${truncatedAddr}</code>`;
+  } else if (isTopUp && state.targetIdentityId) {
     // Truncate identity ID for display
     const truncatedId = state.targetIdentityId.length > 12
       ? `${state.targetIdentityId.slice(0, 8)}...${state.targetIdentityId.slice(-4)}`
@@ -556,7 +650,7 @@ function renderDepositStep(state: BridgeState): HTMLElement {
   }
 
   // Mode-specific note at bottom
-  if (state.mode === 'topup') {
+  if (state.mode === 'topup' || state.mode === 'fund_address') {
     // One-time key warning for top-up
     const keyWarning = document.createElement('div');
     keyWarning.className = 'key-warning';
@@ -580,19 +674,24 @@ function renderProcessingStep(state: BridgeState): HTMLElement {
   const div = document.createElement('div');
   div.className = 'processing-step';
   const isTopUp = state.mode === 'topup';
+  const isFundAddress = state.mode === 'fund_address';
 
   // Headline
   const headline = document.createElement('h2');
   headline.className = 'processing-headline';
-  headline.textContent = isTopUp ? 'Processing top-up' : 'Creating your identity';
+  headline.textContent = isFundAddress
+    ? 'Funding platform address'
+    : isTopUp ? 'Processing top-up' : 'Creating your identity';
   div.appendChild(headline);
 
   // Subtitle
   const subtitle = document.createElement('p');
   subtitle.className = 'processing-subtitle';
-  subtitle.textContent = isTopUp
-    ? 'Adding credits to your identity on Dash Platform.'
-    : 'Registering your identity on Dash Platform. This may take a moment.';
+  subtitle.textContent = isFundAddress
+    ? 'Sending credits to the platform address.'
+    : isTopUp
+      ? 'Adding credits to your identity on Dash Platform.'
+      : 'Registering your identity on Dash Platform. This may take a moment.';
   div.appendChild(subtitle);
 
   const spinner = document.createElement('div');
@@ -640,22 +739,27 @@ function renderProcessingStep(state: BridgeState): HTMLElement {
 function renderCompleteStep(state: BridgeState): HTMLElement {
   const div = document.createElement('div');
   const isTopUp = state.mode === 'topup';
-  div.className = `complete-step ${isTopUp ? 'topup-complete' : ''}`;
+  const isFundAddress = state.mode === 'fund_address';
+  div.className = `complete-step ${(isTopUp || isFundAddress) ? 'topup-complete' : ''}`;
 
   // Lead with mode-specific headline
   const headline = document.createElement('h2');
   headline.className = 'complete-headline';
-  headline.textContent = isTopUp ? 'Top-up complete!' : 'Save your keys';
+  headline.textContent = isFundAddress
+    ? 'Funding complete!'
+    : isTopUp ? 'Top-up complete!' : 'Save your keys';
   div.appendChild(headline);
 
   const subtitle = document.createElement('p');
   subtitle.className = 'complete-subtitle';
-  subtitle.textContent = isTopUp
-    ? 'Credits have been added to your identity.'
-    : 'Your identity was created. Download your keys to access it.';
+  subtitle.textContent = isFundAddress
+    ? 'Credits have been sent to the platform address.'
+    : isTopUp
+      ? 'Credits have been added to your identity.'
+      : 'Your identity was created. Download your keys to access it.';
   div.appendChild(subtitle);
 
-  if (!isTopUp) {
+  if (!isTopUp && !isFundAddress) {
     // Primary action - key backup (only for create mode)
     const backupSection = document.createElement('div');
     backupSection.className = 'backup-section';
@@ -666,17 +770,27 @@ function renderCompleteStep(state: BridgeState): HTMLElement {
     div.appendChild(backupSection);
   }
 
-  // Identity ID info
-  const identityInfo = document.createElement('div');
-  identityInfo.className = 'identity-info';
-  identityInfo.innerHTML = `
-    <label>${isTopUp ? 'Identity ID' : 'Your Identity ID'}</label>
-    <code class="identity-id">${state.identityId || state.targetIdentityId || 'Unknown'}</code>
-  `;
-  div.appendChild(identityInfo);
+  // Identity/address info
+  if (isFundAddress && state.platformAddress) {
+    const addressInfo = document.createElement('div');
+    addressInfo.className = 'identity-info';
+    addressInfo.innerHTML = `
+      <label>Platform Address</label>
+      <code class="identity-id">${state.platformAddress}</code>
+    `;
+    div.appendChild(addressInfo);
+  } else {
+    const identityInfo = document.createElement('div');
+    identityInfo.className = 'identity-info';
+    identityInfo.innerHTML = `
+      <label>${isTopUp ? 'Identity ID' : 'Your Identity ID'}</label>
+      <code class="identity-id">${state.identityId || state.targetIdentityId || 'Unknown'}</code>
+    `;
+    div.appendChild(identityInfo);
+  }
 
-  // Transaction ID (for top-up mode)
-  if (isTopUp && state.txid) {
+  // Transaction ID (for top-up/fund_address mode)
+  if ((isTopUp || isFundAddress) && state.txid) {
     const txInfo = document.createElement('div');
     txInfo.className = 'tx-info';
     txInfo.innerHTML = `
@@ -686,8 +800,8 @@ function renderCompleteStep(state: BridgeState): HTMLElement {
     div.appendChild(txInfo);
   }
 
-  // DPNS prompt (only for create mode, not top-up)
-  if (!isTopUp && state.identityId) {
+  // DPNS prompt (only for create mode, not top-up or fund_address)
+  if (!isTopUp && !isFundAddress && state.identityId) {
     const dpnsPrompt = document.createElement('div');
     dpnsPrompt.className = 'dpns-prompt';
     dpnsPrompt.innerHTML = `
@@ -728,6 +842,7 @@ function renderErrorStep(state: BridgeState): HTMLElement {
 export function createKeyBackup(state: BridgeState): string {
   const network = getNetwork(state.network);
   const isTopUp = state.mode === 'topup';
+  const isFundAddress = state.mode === 'fund_address';
 
   const backup: Record<string, unknown> = {
     network: state.network,
@@ -737,8 +852,13 @@ export function createKeyBackup(state: BridgeState): string {
     txid: state.txid,
   };
 
+  // For fund_address: include platform address
+  if (isFundAddress) {
+    backup.platformAddress = state.platformAddress;
+  }
+
   // For create mode: include mnemonic and identity keys
-  if (!isTopUp) {
+  if (!isTopUp && !isFundAddress) {
     backup.mnemonic = state.mnemonic;
     backup.identityId = state.identityId;
     backup.identityKeys = state.identityKeys.map((key) => ({
@@ -782,10 +902,14 @@ export function downloadKeyBackup(state: BridgeState): void {
   const blob = new Blob([backup], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const isTopUp = state.mode === 'topup';
+  const isFundAddress = state.mode === 'fund_address';
 
   // Generate descriptive filename based on mode and available data
   let filename: string;
-  if (isTopUp && state.targetIdentityId) {
+  if (isFundAddress && state.platformAddress) {
+    const addrShort = state.platformAddress.slice(-8);
+    filename = `dash-fund-address-${addrShort}-recovery.json`;
+  } else if (isTopUp && state.targetIdentityId) {
     // Top-up mode: include target identity ID for reference
     const idShort = state.targetIdentityId.slice(0, 8);
     filename = `dash-topup-${idShort}-recovery.json`;
@@ -794,7 +918,7 @@ export function downloadKeyBackup(state: BridgeState): void {
   } else if (state.depositAddress) {
     // Use first/last chars of address for recognizability
     const addr = state.depositAddress;
-    const prefix = isTopUp ? 'dash-topup' : 'dash-keys';
+    const prefix = isFundAddress ? 'dash-fund' : isTopUp ? 'dash-topup' : 'dash-keys';
     filename = `${prefix}-${addr.slice(0, 6)}-${addr.slice(-4)}-pending.json`;
   } else {
     filename = `dash-keys-${Date.now()}.json`;

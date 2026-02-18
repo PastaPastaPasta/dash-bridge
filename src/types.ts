@@ -64,7 +64,7 @@ export interface IdentityKeyConfig {
 /**
  * Bridge operation mode
  */
-export type BridgeMode = 'create' | 'topup' | 'dpns' | 'manage';
+export type BridgeMode = 'create' | 'topup' | 'fund_address' | 'dpns' | 'manage';
 
 /**
  * DPNS identity source for standalone mode
@@ -156,6 +156,8 @@ export type BridgeStep =
   | 'waiting_islock'
   | 'registering_identity'
   | 'topping_up'          // Top-up: calling sdk.identities.topUp()
+  | 'enter_platform_address'  // Fund address: user enters platform address private key
+  | 'funding_address'         // Fund address: calling sdk.addresses.fundFromAssetLock()
   | 'complete'
   | 'error'
   // DPNS username registration steps
@@ -213,8 +215,14 @@ export interface BridgeState {
   detectedDepositAmount?: number;
   /** Target identity ID for top-up (user-provided) */
   targetIdentityId?: string;
-  /** Whether asset lock key is a one-time random key (for top-up) vs HD-derived */
+  /** Whether asset lock key is a one-time random key (for top-up/fund_address) vs HD-derived */
   isOneTimeKey?: boolean;
+
+  // Fund Platform Address fields
+  /** Fund address: WIF of user's platform address key */
+  platformAddressPrivateKeyWif?: string;
+  /** Fund address: derived bech32m platform address (for display) */
+  platformAddress?: string;
 
   // DPNS username registration fields
   /** DPNS: usernames to register */

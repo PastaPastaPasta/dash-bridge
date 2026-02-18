@@ -1,4 +1,10 @@
-import { EvoSDK } from '@dashevo/evo-sdk';
+import {
+  EvoSDK,
+  PrivateKey,
+  AssetLockProof,
+  PlatformAddressSigner,
+  PlatformAddressOutput,
+} from '@dashevo/evo-sdk';
 import { sha256 } from '@noble/hashes/sha256';
 import { ripemd160 } from '@noble/hashes/ripemd160';
 import type { PublicKeyInfo, IdentityKeyConfig } from '../types.js';
@@ -308,4 +314,59 @@ export async function updateIdentity(
       error: errorMessage,
     };
   }
+}
+
+/**
+ * Fund a Platform address from an asset lock
+ *
+ * Very similar to topUp, but sends credits to a Platform address
+ * instead of an identity. Uses sdk.addresses.fundFromAssetLock().
+ */
+export async function fundPlatformAddress(
+  platformAddressPrivateKeyWif: string,
+  assetLockProofHex: string,
+  assetLockPrivateKeyWif: string,
+  network: 'testnet' | 'mainnet',
+  retryOptions?: RetryOptions
+): Promise<{ success: boolean; address?: string }> {
+  const sdk = network === 'mainnet'
+    ? EvoSDK.mainnet()
+    : EvoSDK.testnet();
+
+  console.log(`Connecting to ${network}...`);
+  await withRetry(() => sdk.connect(), retryOptions);
+  console.log('Connected to Platform');
+
+  // Build the asset lock proof from hex
+  const assetLockProof = AssetLockProof.fromHex(assetLockProofHex);
+
+  // Build the asset lock private key
+  const assetLockPrivateKey = PrivateKey.fromWIF(assetLockPrivateKeyWif);
+
+  // Build the signer with the platform address private key
+  const signer = new PlatformAddressSigner();
+  const addressPrivateKey = PrivateKey.fromWIF(platformAddressPrivateKeyWif);
+  const platformAddr = signer.addKey(addressPrivateKey);
+
+  // Create output (no amount = send all remaining after fees)
+  const output = new PlatformAddressOutput(platformAddr);
+
+  console.log('Funding platform address:', platformAddr.toBech32m(network));
+
+  const result = await withRetry(
+    () => sdk.addresses.fundFromAssetLock({
+      assetLockProof,
+      assetLockPrivateKey,
+      outputs: [output],
+      signer,
+    }),
+    retryOptions
+  );
+
+  console.log('Fund address result:', result);
+
+  return {
+    success: true,
+    address: platformAddr.toBech32m(network),
+  };
 }

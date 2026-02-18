@@ -10,6 +10,7 @@ export {
   registerIdentity,
   topUpIdentity,
   updateIdentity,
+  fundPlatformAddress,
 } from './identity.js';
 
 export type { AddKeyConfig } from './identity.js';
