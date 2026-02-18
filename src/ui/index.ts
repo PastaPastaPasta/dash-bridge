@@ -6,6 +6,8 @@ export {
   setTargetIdentityId,
   setOneTimeKeyPair,
   setTopUpComplete,
+  setPlatformAddress,
+  setFundAddressComplete,
   setUtxoDetected,
   setTransactionSigned,
   setTransactionBroadcast,
