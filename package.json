@@ -10,7 +10,7 @@
     "test": "vitest"
   },
   "dependencies": {
-    "@dashevo/evo-sdk": "3.0.0-dev.9",
+    "@dashevo/evo-sdk": "^3.0.1",
     "@noble/hashes": "^1.4.0",
     "@noble/secp256k1": "^2.1.0",
     "@scure/bip32": "^2.0.1",

@@ -1,4 +1,4 @@
-import { EvoSDK } from '@dashevo/evo-sdk';
+import { EvoSDK, IdentitySigner } from '@dashevo/evo-sdk';
 import type { DpnsUsernameEntry, DpnsRegistrationResult, IdentityPublicKeyInfo } from '../types.js';
 import { withRetry, type RetryOptions } from '../utils/retry.js';
 
@@ -66,8 +66,8 @@ export async function getIdentityPublicKeys(
       };
       const securityLevel = levelMap[levelStr] ?? 0;
 
-      // Get public key data - SDK v3 returns it as publicKeyData (hex string)
-      const rawData = key.publicKeyData;
+      // SDK v3.0.1 returns key data as `data` (hex string)
+      const rawData = key.data;
 
       // Convert hex string to Uint8Array
       let data: Uint8Array;
@@ -81,8 +81,8 @@ export async function getIdentityPublicKeys(
         data = new Uint8Array(0);
       }
 
-      // Get disabled status (SDK uses 'disabled' boolean field)
-      const isDisabled = key.disabled;
+      // SDK v3.0.1 uses disabledAt timestamp instead of disabled boolean
+      const isDisabled = key.disabledAt !== undefined;
 
       result.push({
         id,
@@ -304,13 +304,29 @@ export async function registerDpnsName(
   try {
     console.log(`Registering username "${label}" for identity ${identityId}...`);
 
+    const identity = await withRetry(
+      () => sdk.identities.fetch(identityId),
+      retryOptions
+    );
+    if (!identity) {
+      throw new Error('Identity not found');
+    }
+
+    const identityKey = identity.getPublicKeyById(publicKeyId);
+    if (!identityKey) {
+      throw new Error(`Identity key ${publicKeyId} not found`);
+    }
+
+    const signer = new IdentitySigner();
+    signer.addKeyFromWif(privateKeyWif);
+
     await withRetry(
       () => sdk.dpns.registerName({
         label,
-        identityId,
-        publicKeyId,
-        privateKeyWif,
-        onPreorder: onPreorder ? () => onPreorder() : undefined,
+        identity,
+        identityKey,
+        signer,
+        preorderCallback: onPreorder ? () => onPreorder() : undefined,
       }),
       retryOptions
     );

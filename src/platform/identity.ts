@@ -1,4 +1,12 @@
-import { EvoSDK } from '@dashevo/evo-sdk';
+import {
+  EvoSDK,
+  AssetLockProof,
+  Identity,
+  IdentityPublicKey,
+  IdentityPublicKeyInCreation,
+  IdentitySigner,
+  PrivateKey,
+} from '@dashevo/evo-sdk';
 import { sha256 } from '@noble/hashes/sha256';
 import { ripemd160 } from '@noble/hashes/ripemd160';
 import type { PublicKeyInfo, IdentityKeyConfig } from '../types.js';
@@ -9,6 +17,32 @@ import { withRetry, type RetryOptions } from '../utils/retry.js';
  */
 function hash160(data: Uint8Array): Uint8Array {
   return ripemd160(sha256(data));
+}
+
+function hexToBytes(hex: string): Uint8Array {
+  if (!hex || hex.length % 2 !== 0) {
+    throw new Error('Invalid hex string');
+  }
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < bytes.length; i++) {
+    bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  }
+  return bytes;
+}
+
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes)
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+function base64ToBytes(base64: string): Uint8Array {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
 }
 
 /**
@@ -121,40 +155,63 @@ export async function registerIdentity(
 ): Promise<{ identityId: string; balance: number; revision: number }> {
   // Initialize SDK for the target network
   const sdk = network === 'mainnet'
-    ? EvoSDK.mainnet()
-    : EvoSDK.testnet();
+    ? EvoSDK.mainnetTrusted()
+    : EvoSDK.testnetTrusted();
 
   // Connect to the network with retry
   console.log(`Connecting to ${network}...`);
   await withRetry(() => sdk.connect(), retryOptions);
   console.log('Connected to Platform');
 
-  // Create the identity using the SDK format
-  // The SDK expects publicKeys as a JSON string with keyType, purpose, securityLevel as strings
-  const publicKeysForSdk = identityKeys.map((key) => ({
-    keyType: key.keyType,
-    purpose: key.purpose,
-    securityLevel: key.securityLevel,
-    privateKeyHex: key.privateKeyHex,
-  }));
+  // v3.0.1 API expects typed objects (Identity/AssetLockProof/Signer)
+  const proof = AssetLockProof.fromHex(assetLockProof);
+  const identityId = proof.createIdentityId().toString();
+  const identity = new Identity(identityId);
+  const signer = new IdentitySigner();
 
-  console.log('Creating identity with', publicKeysForSdk.length, 'keys...');
-  // Note: The SDK types say unknown[] but the actual implementation expects a JSON string
-  const identity = await withRetry(
+  for (const key of identityKeys) {
+    const keyBytes = key.keyType === 'ECDSA_HASH160'
+      ? hash160(key.publicKey)
+      : key.publicKey;
+
+    const publicKey = new IdentityPublicKey(
+      key.id,
+      key.purpose,
+      key.securityLevel,
+      key.keyType,
+      false,
+      bytesToHex(keyBytes),
+      undefined,
+      undefined
+    );
+    identity.addPublicKey(publicKey);
+    signer.addKeyFromWif(key.privateKeyWif);
+  }
+
+  const assetLockPrivateKey = PrivateKey.fromWIF(assetLockPrivateKeyWif);
+
+  console.log('Creating identity with', identityKeys.length, 'keys...');
+  await withRetry(
     () => sdk.identities.create({
-      assetLockProof,
-      assetLockPrivateKeyWif,
-      publicKeys: JSON.stringify(publicKeysForSdk) as unknown as unknown[],
+      identity,
+      assetLockProof: proof,
+      assetLockPrivateKey,
+      signer,
     }),
     retryOptions
   );
 
-  console.log('Identity created:', identity);
+  const balanceAndRevision = await withRetry(
+    () => sdk.identities.balanceAndRevision(identityId),
+    retryOptions
+  );
+
+  console.log('Identity created:', identityId);
 
   return {
-    identityId: identity.identityId || identity.id?.() || String(identity),
-    balance: identity.balance || 0,
-    revision: identity.revision || 0,
+    identityId,
+    balance: Number(balanceAndRevision?.balance ?? 0n),
+    revision: Number(balanceAndRevision?.revision ?? 0n),
   };
 }
 
@@ -185,12 +242,23 @@ export async function topUpIdentity(
   await withRetry(() => sdk.connect(), retryOptions);
   console.log('Connected to Platform');
 
+  const identity = await withRetry(
+    () => sdk.identities.fetch(identityId),
+    retryOptions
+  );
+  if (!identity) {
+    throw new Error(`Identity not found: ${identityId}`);
+  }
+
+  const proof = AssetLockProof.fromHex(assetLockProof);
+  const assetLockPrivateKey = PrivateKey.fromWIF(assetLockPrivateKeyWif);
+
   console.log('Topping up identity:', identityId);
   const result = await withRetry(
     () => sdk.identities.topUp({
-      identityId,
-      assetLockProof,
-      assetLockPrivateKeyWif,
+      identity,
+      assetLockProof: proof,
+      assetLockPrivateKey,
     }),
     retryOptions
   );
@@ -199,7 +267,7 @@ export async function topUpIdentity(
 
   return {
     success: true,
-    balance: result.balance || undefined,
+    balance: Number(result),
   };
 }
 
@@ -249,52 +317,63 @@ export async function updateIdentity(
     console.log('Updating identity:', identityId);
     console.log('Adding', addPublicKeys.length, 'keys, disabling', disablePublicKeyIds.length, 'keys');
 
-    // Format keys for SDK
-    // For ECDSA_SECP256K1 keys: just pass privateKeyHex, SDK derives public key
-    // For ECDSA_HASH160 keys: need to pass 'data' with 20-byte hash160
-    const formattedAddKeys = addPublicKeys.map(key => {
+    const identity = await withRetry(
+      () => sdk.identities.fetch(identityId),
+      retryOptions
+    );
+    if (!identity) {
+      throw new Error(`Identity not found: ${identityId}`);
+    }
+
+    const signer = new IdentitySigner();
+    signer.addKeyFromWif(privateKeyWif);
+
+    const existingKeys = identity.getPublicKeys();
+    const maxKeyId = existingKeys.reduce((max, key) => Math.max(max, key.keyId), -1);
+
+    const formattedAddKeys: IdentityPublicKeyInCreation[] = addPublicKeys.map((key, index) => {
       const isHash160Type = key.keyType === 'ECDSA_HASH160';
+      let keyDataBytes: Uint8Array;
 
       if (isHash160Type && key.publicKeyHex) {
-        // For HASH160 type, compute hash160 and pass as 'data'
-        const pubKeyBytes = new Uint8Array(key.publicKeyHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
-        const hash160Bytes = hash160(pubKeyBytes);
-        const dataBase64 = btoa(String.fromCharCode(...hash160Bytes));
-
-        return {
-          keyType: key.keyType,
-          purpose: key.purpose,
-          securityLevel: key.securityLevel,
-          data: dataBase64,
-        };
+        keyDataBytes = hash160(hexToBytes(key.publicKeyHex));
+      } else if (key.publicKeyHex) {
+        keyDataBytes = hexToBytes(key.publicKeyHex);
+      } else if (key.publicKeyBase64) {
+        keyDataBytes = base64ToBytes(key.publicKeyBase64);
       } else {
-        // For SECP256K1 and other types, just pass privateKeyHex - SDK derives pubkey
-        return {
-          keyType: key.keyType,
-          purpose: key.purpose,
-          securityLevel: key.securityLevel,
-          ...(key.privateKeyHex ? { privateKeyHex: key.privateKeyHex } : {}),
-        };
+        throw new Error('Missing key data for identity update');
       }
+
+      return new IdentityPublicKeyInCreation(
+        maxKeyId + index + 1,
+        key.purpose,
+        key.securityLevel,
+        key.keyType,
+        false,
+        keyDataBytes,
+        undefined,
+        undefined
+      );
     });
 
     console.log('Formatted keys to add:', JSON.stringify(formattedAddKeys, null, 2));
 
-    const result = await withRetry(
+    await withRetry(
       () => sdk.identities.update({
-        identityId,
-        privateKeyWif,
+        identity,
+        signer,
         addPublicKeys: formattedAddKeys.length > 0
-          ? JSON.stringify(formattedAddKeys) as unknown as unknown[]
+          ? formattedAddKeys
           : undefined,
-        disablePublicKeyIds: disablePublicKeyIds.length > 0
+        disablePublicKeys: disablePublicKeyIds.length > 0
           ? disablePublicKeyIds
           : undefined,
       }),
       retryOptions
     );
 
-    console.log('Update result:', result);
+    console.log('Update completed');
 
     return { success: true };
   } catch (error) {
