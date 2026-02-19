@@ -5,7 +5,8 @@ import { createAssetLockTransaction, serializeTransaction } from './transaction/
 import { InsightClient } from './api/insight.js';
 import { DAPIClient } from './api/dapi.js';
 import { buildInstantAssetLockProof } from './proof/index.js';
-import { registerIdentity, topUpIdentity, updateIdentity, AddKeyConfig } from './platform/index.js';
+import { registerIdentity, topUpIdentity, updateIdentity, sendToPlatformAddress, AddKeyConfig } from './platform/index.js';
+import { bech32m } from '@scure/base';
 import { privateKeyToWif, bytesToHex } from './utils/index.js';
 import {
   createInitialState,
@@ -15,6 +16,8 @@ import {
   setTargetIdentityId,
   setOneTimeKeyPair,
   setTopUpComplete,
+  setRecipientPlatformAddress,
+  setSendToAddressComplete,
   setUtxoDetected,
   setTransactionSigned,
   setTransactionBroadcast,
@@ -202,7 +205,15 @@ function setupEventListeners(container: HTMLElement) {
     });
   }
 
-  // Back button (configure keys or enter identity -> init)
+  // Platform Address mode button (init page)
+  const modeSendToAddressBtn = container.querySelector('#mode-send-to-address-btn');
+  if (modeSendToAddressBtn) {
+    modeSendToAddressBtn.addEventListener('click', () => {
+      updateState(setMode(state, 'send_to_address'));
+    });
+  }
+
+  // Back button (configure keys, enter identity, enter recipient address -> init)
   const backBtn = container.querySelector('#back-btn');
   if (backBtn) {
     backBtn.addEventListener('click', () => {
@@ -227,6 +238,33 @@ function setupEventListeners(container: HTMLElement) {
         startTopUp();
       } else {
         showValidationError('Please enter a valid identity ID (44 character Base58 string)');
+      }
+    });
+  }
+
+  // Recipient platform address input (send_to_address mode)
+  const recipientAddressInput = container.querySelector('#recipient-address-input');
+  if (recipientAddressInput) {
+    recipientAddressInput.addEventListener('input', (e) => {
+      const value = (e.target as HTMLInputElement).value.trim();
+      updateState(setRecipientPlatformAddress(state, value));
+    });
+  }
+
+  // Continue send to address button
+  const continueSendToAddressBtn = container.querySelector('#continue-send-to-address-btn');
+  if (continueSendToAddressBtn) {
+    continueSendToAddressBtn.addEventListener('click', () => {
+      const address = state.recipientPlatformAddress;
+      if (address && validatePlatformAddress(address, state.network)) {
+        startSendToAddress();
+      } else {
+        const prefix = `${getNetwork(state.network).platformHrp}1`;
+        const msg = document.getElementById('recipient-address-validation-msg');
+        if (msg) {
+          msg.textContent = `Please enter a valid bech32m platform address (starts with ${prefix})`;
+          msg.classList.remove('hidden');
+        }
       }
     });
   }
@@ -920,6 +958,21 @@ function validateIdentityId(id?: string): boolean {
 }
 
 /**
+ * Validate platform address format (bech32m, correct network prefix)
+ */
+function validatePlatformAddress(address: string, network: 'testnet' | 'mainnet'): boolean {
+  const trimmed = address.trim();
+  if (!trimmed) return false;
+
+  try {
+    const decoded = bech32m.decode(trimmed as `${string}1${string}`);
+    return decoded.prefix === getNetwork(network).platformHrp;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Show validation error message in the UI
  */
 function showValidationError(message: string): void {
@@ -1034,6 +1087,108 @@ async function startTopUp() {
 
   } catch (error) {
     console.error('Top-up error:', error);
+    updateState(setError(state, error instanceof Error ? error : new Error(String(error))));
+  }
+}
+
+/**
+ * Start the send-to-platform-address process (asset lock → send to recipient address)
+ */
+async function startSendToAddress() {
+  try {
+    const network = getNetwork(state.network);
+
+    // Step 1: Generate random one-time key pair
+    updateState(setStep(state, 'generating_keys'));
+
+    const assetLockKeyPair = generateKeyPair();
+    const depositAddress = publicKeyToAddress(assetLockKeyPair.publicKey, network);
+
+    const stateWithKeys = setOneTimeKeyPair(state, assetLockKeyPair, depositAddress);
+    updateState(stateWithKeys);
+
+    // Auto-download key backup for safety
+    downloadKeyBackup(stateWithKeys);
+
+    // Step 2: Wait for deposit
+    updateState(setStep(stateWithKeys, 'detecting_deposit'));
+
+    const minAmount = 300000; // 0.003 DASH minimum
+    const depositResult = await insightClient.waitForUtxo(
+      depositAddress,
+      minAmount,
+      120000,
+      3000
+    );
+
+    if (!depositResult.utxo) {
+      updateState(setDepositTimedOut(state, true, depositResult.totalAmount));
+      return;
+    }
+
+    const utxo = depositResult.utxo;
+    updateState(setUtxoDetected(state, utxo));
+
+    // Step 3: Build transaction
+    updateState(setStep(state, 'building_transaction'));
+
+    const tx = createAssetLockTransaction(
+      utxo,
+      assetLockKeyPair.publicKey,
+      BigInt(network.minFee)
+    );
+
+    // Step 4: Sign transaction
+    updateState(setStep(state, 'signing_transaction'));
+
+    const signedTx = await signTransaction(
+      tx,
+      [utxo],
+      assetLockKeyPair.privateKey,
+      assetLockKeyPair.publicKey
+    );
+
+    const signedTxBytes = serializeTransaction(signedTx);
+    const signedTxHex = bytesToHex(signedTxBytes);
+
+    updateState(setTransactionSigned(state, signedTxHex));
+
+    // Step 5: Broadcast transaction
+    const txid = await insightClient.broadcastTransaction(signedTxHex);
+    updateState(setTransactionBroadcast(state, txid));
+
+    // Step 6: Wait for InstantSend lock
+    updateState(setStep(state, 'waiting_islock'));
+
+    const islockBytes = await dapiClient.waitForInstantSendLock(txid, 60000);
+
+    const assetLockProof = buildInstantAssetLockProof(
+      signedTxBytes,
+      islockBytes,
+      0
+    );
+
+    updateState(setInstantLockReceived(state, islockBytes, assetLockProof));
+
+    // Step 7: Send to the recipient platform address
+    updateState(setStep(state, 'sending_to_address'));
+
+    const assetLockPrivateKeyWif = privateKeyToWif(
+      assetLockKeyPair.privateKey,
+      network
+    );
+
+    await sendToPlatformAddress(
+      state.recipientPlatformAddress!,
+      assetLockProof,
+      assetLockPrivateKeyWif,
+      state.network
+    );
+
+    updateState(setSendToAddressComplete(state));
+
+  } catch (error) {
+    console.error('Send to platform address error:', error);
     updateState(setError(state, error instanceof Error ? error : new Error(String(error))));
   }
 }
@@ -1237,25 +1392,43 @@ async function recheckDeposit() {
 
     updateState(setInstantLockReceived(state, islockBytes, assetLockProof));
 
-    // Step 7: Register identity
-    updateState(setStep(state, 'registering_identity'));
-
+    // Step 7: Mode-specific final operation
     const assetLockPrivateKeyWif = privateKeyToWif(
       assetLockKeyPair.privateKey,
       network
     );
 
-    const result = await registerIdentity(
-      assetLockProof,
-      assetLockPrivateKeyWif,
-      state.identityKeys,
-      state.network
-    );
-
-    updateState(setIdentityRegistered(state, result.identityId));
-
-    // Auto-download final key backup on "Save your keys" page
-    downloadKeyBackup(state);
+    if (state.mode === 'topup') {
+      updateState(setStep(state, 'topping_up'));
+      await topUpIdentity(
+        state.targetIdentityId!,
+        assetLockProof,
+        assetLockPrivateKeyWif,
+        state.network
+      );
+      updateState(setTopUpComplete(state));
+    } else if (state.mode === 'send_to_address') {
+      updateState(setStep(state, 'sending_to_address'));
+      await sendToPlatformAddress(
+        state.recipientPlatformAddress!,
+        assetLockProof,
+        assetLockPrivateKeyWif,
+        state.network
+      );
+      updateState(setSendToAddressComplete(state));
+    } else {
+      // Default: create mode — register identity
+      updateState(setStep(state, 'registering_identity'));
+      const result = await registerIdentity(
+        assetLockProof,
+        assetLockPrivateKeyWif,
+        state.identityKeys,
+        state.network
+      );
+      updateState(setIdentityRegistered(state, result.identityId));
+      // Auto-download final key backup on "Save your keys" page
+      downloadKeyBackup(state);
+    }
 
   } catch (error) {
     console.error('Bridge error:', error);
