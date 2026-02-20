@@ -1363,6 +1363,7 @@ async function startManageUpdate() {
       privateKeyHex: key.source === 'generate' ? key.generatedKey?.privateKeyHex : undefined,
       publicKeyHex: key.source === 'generate' ? key.generatedKey?.publicKeyHex : undefined,
       publicKeyBase64: key.source === 'import' ? key.importedPublicKeyBase64 : undefined,
+      privateKeyWif: key.source === 'generate' ? key.generatedKey?.privateKeyWif : undefined,
     }));
 
     // Get key IDs to disable

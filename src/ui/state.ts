@@ -10,6 +10,7 @@ import type {
   DpnsIdentitySource,
   IdentityPublicKeyInfo,
   ManageNewKeyConfig,
+  AssetLockProofData,
 } from '../types.js';
 import {
   generateDefaultIdentityKeysHD,
@@ -295,7 +296,7 @@ export function setTransactionBroadcast(
 export function setInstantLockReceived(
   state: BridgeState,
   instantLockBytes: Uint8Array,
-  assetLockProof: string
+  assetLockProof: AssetLockProofData
 ): BridgeState {
   return {
     ...state,
