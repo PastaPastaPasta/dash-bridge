@@ -33,6 +33,7 @@ test.describe('Deterministic UI E2E (mock mode)', () => {
 
     await expect(page.getByText('Review Usernames')).toBeVisible();
     await expect(page.getByText('Available (Contested)')).toBeVisible();
+    await expect(page.locator('#dpns-contested-checkbox')).toBeVisible();
     await expect(page.locator('#register-dpns-btn')).toBeDisabled();
 
     await page.check('#dpns-contested-checkbox');
@@ -55,6 +56,11 @@ test.describe('Deterministic UI E2E (mock mode)', () => {
     await page.click('#continue-topup-btn');
 
     await expect(page.locator('.deposit-headline')).toBeVisible();
+    await expect.poll(async () => {
+      return page.evaluate(() => typeof (window as { __e2eMockAdvance?: () => void }).__e2eMockAdvance);
+    }).toBe('function');
+    await page.evaluate(() => (window as { __e2eMockAdvance?: () => void }).__e2eMockAdvance?.());
+
     await expect(page.getByText('Processing top-up')).toBeVisible();
     await expect(page.getByText('Top-up complete!')).toBeVisible();
     await expect(page.locator('.identity-id')).toHaveText(MOCK_IDENTITY_ID);

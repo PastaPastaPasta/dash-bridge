@@ -1068,7 +1068,7 @@ async function startTopUp() {
       await delay(120);
       updateState(setOneTimeKeyPair(state, assetLockKeyPair, depositAddress));
       updateState(setStep(state, 'detecting_deposit'));
-      await delay(120);
+      await waitForE2EMockAdvance();
       updateState(setUtxoDetected(state, createE2EMockUtxo()));
       await delay(120);
       updateState(setTransactionSigned(state, 'ab'.repeat(180)));
