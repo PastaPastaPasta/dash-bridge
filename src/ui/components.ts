@@ -485,8 +485,8 @@ function renderEnterRecipientAddressStep(state: BridgeState): HTMLElement {
   const addrGroup = document.createElement('div');
   addrGroup.className = 'input-group';
 
-  const prefix = state.network === 'testnet' ? 'tevo1...' : 'evo1...';
-  const prefixShort = state.network === 'testnet' ? 'tevo1' : 'evo1';
+  const prefix = state.network === 'testnet' ? 'tdash1...' : 'dash1...';
+  const prefixShort = state.network === 'testnet' ? 'tdash1' : 'dash1';
   addrGroup.innerHTML = '<label class="input-label">Recipient Platform Address</label>';
 
   const input = document.createElement('input');

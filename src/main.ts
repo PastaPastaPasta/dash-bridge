@@ -328,7 +328,7 @@ function setupEventListeners(container: HTMLElement) {
       if (address && validatePlatformAddress(address, state.network)) {
         startSendToAddress();
       } else {
-        const prefix = state.network === 'testnet' ? 'tevo1' : 'evo1';
+        const prefix = state.network === 'testnet' ? 'tdash1' : 'dash1';
         const msg = document.getElementById('recipient-address-validation-msg');
         if (msg) {
           msg.textContent = `Please enter a valid bech32m platform address (starts with ${prefix})`;
