@@ -81,6 +81,7 @@ import {
   checkMultipleAvailability,
   registerMultipleNames,
   getIdentityPublicKeys,
+  isContestedUsername,
 } from './platform/dpns.js';
 import {
   findMatchingKeyIndex,
@@ -162,6 +163,7 @@ function createE2EMockDpnsAvailability(entries: DpnsUsernameEntry[]): DpnsUserna
     return {
       ...entry,
       isAvailable,
+      isContested: isAvailable ? isContestedUsername(lower) : undefined,
       status: isAvailable ? 'available' : 'taken',
     };
   });
