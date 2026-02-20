@@ -140,6 +140,8 @@ function clearModeSensitiveFields(state: BridgeState, mode: BridgeMode): BridgeS
     platformAddressPrivateKeyWif: mode === 'fund_address' ? state.platformAddressPrivateKeyWif : undefined,
     platformAddress: mode === 'fund_address' ? state.platformAddress : undefined,
     recipientPlatformAddress: mode === 'send_to_address' ? state.recipientPlatformAddress : undefined,
+    targetIdentityId: undefined,
+    identityId: undefined,
   };
 }
 
