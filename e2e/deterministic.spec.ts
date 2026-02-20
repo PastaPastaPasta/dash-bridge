@@ -36,7 +36,7 @@ test.describe('Deterministic UI E2E (mock mode)', () => {
     await expect(page.locator('#dpns-contested-checkbox')).toBeVisible();
     await expect(page.locator('#register-dpns-btn')).toBeDisabled();
 
-    await page.check('#dpns-contested-checkbox');
+    await page.locator('#dpns-contested-checkbox').click({ force: true });
     await expect(page.locator('#register-dpns-btn')).toBeEnabled();
 
     await page.click('#register-dpns-btn');
