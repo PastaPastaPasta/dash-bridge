@@ -90,13 +90,92 @@ import {
   getPurposeName,
   generateIdentityKey,
 } from './crypto/keys.js';
-import type { KeyType, KeyPurpose, SecurityLevel, ManageNewKeyConfig } from './types.js';
+import type {
+  KeyType,
+  KeyPurpose,
+  SecurityLevel,
+  ManageNewKeyConfig,
+  DpnsUsernameEntry,
+  DpnsRegistrationResult,
+  IdentityPublicKeyInfo,
+} from './types.js';
 import type { BridgeState } from './types.js';
 
 // Global state
 let state: BridgeState;
 let insightClient: InsightClient;
 let dapiClient: DAPIClient;
+
+const E2E_MOCK_IDENTITY_ID = '11111111111111111111111111111111111111111111';
+const E2E_MOCK_DPNS_WIF = 'cMockDpnsPrivateKeyWif';
+const E2E_MOCK_MANAGE_WIF = 'cMockManagePrivateKeyWif';
+
+function isE2EMockMode(): boolean {
+  const urlParams = new URLSearchParams(window.location.search);
+  return urlParams.get('e2e') === 'mock';
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function createE2EMockUtxo(): import('./types.js').UTXO {
+  return {
+    txid: 'a'.repeat(64),
+    vout: 0,
+    satoshis: 450000,
+    scriptPubKey: '76a914111111111111111111111111111111111111111188ac',
+    confirmations: 1,
+  };
+}
+
+function createE2EMockIdentityKeys(): IdentityPublicKeyInfo[] {
+  return [
+    {
+      id: 0,
+      type: 0,
+      purpose: 0,
+      securityLevel: 0,
+      data: new Uint8Array(33),
+      isDisabled: false,
+    },
+    {
+      id: 1,
+      type: 0,
+      purpose: 0,
+      securityLevel: 1,
+      data: new Uint8Array(33),
+      isDisabled: false,
+    },
+  ];
+}
+
+function createE2EMockDpnsAvailability(entries: DpnsUsernameEntry[]): DpnsUsernameEntry[] {
+  return entries.map((entry) => {
+    if (!entry.isValid) {
+      return { ...entry, status: 'invalid' };
+    }
+
+    const lower = entry.label.toLowerCase();
+    const isAvailable = !lower.includes('taken');
+    return {
+      ...entry,
+      isAvailable,
+      status: isAvailable ? 'available' : 'taken',
+    };
+  });
+}
+
+function createE2EMockDpnsResults(entries: DpnsUsernameEntry[]): DpnsRegistrationResult[] {
+  return entries
+    .filter((entry) => entry.isValid && entry.isAvailable)
+    .map((entry) => ({
+      label: entry.label,
+      success: !entry.label.toLowerCase().includes('fail'),
+      error: entry.label.toLowerCase().includes('fail') ? 'Mock registration failure' : undefined,
+      isContested: entry.isContested ?? false,
+    }));
+}
 
 /**
  * Initialize the application
@@ -441,6 +520,12 @@ function setupEventListeners(container: HTMLElement) {
       updateState(setDpnsIdentityFetching(state, identityId));
 
       try {
+        if (isE2EMockMode()) {
+          await delay(30);
+          updateState(setDpnsIdentityFetched(state, createE2EMockIdentityKeys()));
+          return;
+        }
+
         const keys = await getIdentityPublicKeys(identityId, state.network);
         updateState(setDpnsIdentityFetched(state, keys));
       } catch (error) {
@@ -493,6 +578,15 @@ function setupEventListeners(container: HTMLElement) {
           return;
         }
         updateState(setDpnsKeyValidationError(state, 'Please enter an identity ID first'));
+        return;
+      }
+
+      if (isE2EMockMode()) {
+        if (privateKeyWif === E2E_MOCK_DPNS_WIF) {
+          updateState(setDpnsKeyValidated(state, 1, privateKeyWif));
+        } else {
+          updateState(setDpnsKeyValidationError(state, 'Mock mode: use the configured test private key'));
+        }
         return;
       }
 
@@ -674,6 +768,12 @@ function setupEventListeners(container: HTMLElement) {
       updateState(setManageIdentityFetching(state, identityId));
 
       try {
+        if (isE2EMockMode()) {
+          await delay(30);
+          updateState(setManageIdentityFetched(state, createE2EMockIdentityKeys()));
+          return;
+        }
+
         const keys = await getIdentityPublicKeys(identityId, state.network);
         updateState(setManageIdentityFetched(state, keys));
       } catch (error) {
@@ -725,6 +825,15 @@ function setupEventListeners(container: HTMLElement) {
           return;
         }
         updateState(setManageKeyValidationError(state, 'Please enter an identity ID first'));
+        return;
+      }
+
+      if (isE2EMockMode()) {
+        if (privateKeyWif === E2E_MOCK_MANAGE_WIF) {
+          updateState(setManageKeyValidated(state, 0, 0, privateKeyWif));
+        } else {
+          updateState(setManageKeyValidationError(state, 'Mock mode: use the configured test private key'));
+        }
         return;
       }
 
@@ -935,6 +1044,29 @@ function showValidationError(message: string): void {
  */
 async function startTopUp() {
   try {
+    if (isE2EMockMode()) {
+      const network = getNetwork(state.network);
+      const assetLockKeyPair = generateKeyPair();
+      const depositAddress = publicKeyToAddress(assetLockKeyPair.publicKey, network);
+
+      updateState(setStep(state, 'generating_keys'));
+      await delay(120);
+      updateState(setOneTimeKeyPair(state, assetLockKeyPair, depositAddress));
+      updateState(setStep(state, 'detecting_deposit'));
+      await delay(120);
+      updateState(setUtxoDetected(state, createE2EMockUtxo()));
+      await delay(120);
+      updateState(setTransactionSigned(state, 'ab'.repeat(180)));
+      await delay(120);
+      updateState(setTransactionBroadcast(state, 'b'.repeat(64)));
+      await delay(120);
+      updateState(setInstantLockReceived(state, new Uint8Array([1, 2, 3, 4]), 'c0ffee'));
+      updateState(setStep(state, 'topping_up'));
+      await delay(120);
+      updateState(setTopUpComplete(state));
+      return;
+    }
+
     const network = getNetwork(state.network);
 
     // Step 1: Generate random one-time key pair (NOT HD-derived)
@@ -1043,6 +1175,28 @@ async function startTopUp() {
  */
 async function startBridge() {
   try {
+    if (isE2EMockMode()) {
+      const network = getNetwork(state.network);
+      const assetLockKeyPair = generateKeyPair();
+      const depositAddress = publicKeyToAddress(assetLockKeyPair.publicKey, network);
+
+      updateState(setStep(state, 'generating_keys'));
+      await delay(120);
+      updateState(setKeyPairs(state, assetLockKeyPair, depositAddress));
+      updateState(setStep(state, 'detecting_deposit'));
+      await delay(120);
+      updateState(setUtxoDetected(state, createE2EMockUtxo()));
+      await delay(120);
+      updateState(setTransactionSigned(state, 'cd'.repeat(180)));
+      await delay(120);
+      updateState(setTransactionBroadcast(state, 'd'.repeat(64)));
+      await delay(120);
+      updateState(setInstantLockReceived(state, new Uint8Array([5, 6, 7, 8]), 'beef'));
+      await delay(120);
+      updateState(setIdentityRegistered(state, E2E_MOCK_IDENTITY_ID));
+      return;
+    }
+
     const network = getNetwork(state.network);
 
     // Ensure mnemonic exists
@@ -1282,6 +1436,12 @@ async function startDpnsCheck() {
     // Transition to checking state
     updateState(setDpnsChecking(state));
 
+    if (isE2EMockMode()) {
+      await delay(60);
+      updateState(setDpnsAvailability(state, createE2EMockDpnsAvailability(validUsernames)));
+      return;
+    }
+
     // Check availability for all valid usernames
     const results = await checkMultipleAvailability(validUsernames, state.network);
 
@@ -1322,6 +1482,17 @@ async function startDpnsRegistration() {
     // Transition to registering state
     updateState(setDpnsRegistering(state));
 
+    if (isE2EMockMode()) {
+      const results = createE2EMockDpnsResults(availableUsernames);
+      for (let i = 0; i < results.length; i++) {
+        await delay(40);
+        updateState(setDpnsRegistrationProgress(state, i));
+      }
+      await delay(40);
+      updateState(setDpnsResults(state, results));
+      return;
+    }
+
     // Register all available usernames
     const results = await registerMultipleNames(
       availableUsernames,
@@ -1354,6 +1525,12 @@ async function startDpnsRegistration() {
 async function startManageUpdate() {
   try {
     updateState(setManageUpdating(state));
+
+    if (isE2EMockMode()) {
+      await delay(80);
+      updateState(setManageComplete(state, { success: true }));
+      return;
+    }
 
     // Prepare keys to add
     const addPublicKeys: AddKeyConfig[] = (state.manageKeysToAdd || []).map(key => ({
