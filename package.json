@@ -7,7 +7,11 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "test": "vitest"
+    "test": "vitest",
+    "test:e2e": "npx playwright@1.52.0 test e2e/deterministic.spec.ts",
+    "test:e2e:headed": "npx playwright@1.52.0 test e2e/deterministic.spec.ts --headed",
+    "test:e2e:live": "PW_E2E_LIVE=1 npx playwright@1.52.0 test e2e/live.testnet.spec.ts",
+    "test:e2e:install": "npx playwright@1.52.0 install --with-deps chromium"
   },
   "dependencies": {
     "@dashevo/evo-sdk": "3.1.0-dev.1",
