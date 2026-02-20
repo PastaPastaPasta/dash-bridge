@@ -6,6 +6,7 @@ import {
   IdentityPublicKeyInCreation,
   IdentitySigner,
   PrivateKey,
+  PlatformAddressSigner,
 } from '@dashevo/evo-sdk';
 import { sha256 } from '@noble/hashes/sha256';
 import { ripemd160 } from '@noble/hashes/ripemd160';
@@ -395,4 +396,81 @@ export async function updateIdentity(
       error: errorMessage,
     };
   }
+}
+
+/**
+ * Send credits to a Platform address from an asset lock
+ *
+ * Accepts any bech32m platform address as the recipient.
+ * Uses sdk.addresses.fundFromAssetLock() with an empty PlatformAddressSigner
+ * since we don't have (or need) the recipient's private key.
+ */
+export async function sendToPlatformAddress(
+  recipientAddress: string,
+  assetLockProofData: AssetLockProofData,
+  assetLockPrivateKeyWif: string,
+  network: 'testnet' | 'mainnet',
+  retryOptions?: RetryOptions
+): Promise<{ success: boolean; recipientAddress: string }> {
+  const sdk = network === 'mainnet'
+    ? EvoSDK.mainnet()
+    : EvoSDK.testnet();
+
+  console.log(`Connecting to ${network}...`);
+  await withRetry(() => sdk.connect(), retryOptions);
+  console.log('Connected to Platform');
+
+  // Build typed AssetLockProof from raw components
+  const assetLockProof = AssetLockProof.createInstantAssetLockProof(
+    assetLockProofData.instantLockBytes,
+    assetLockProofData.transactionBytes,
+    assetLockProofData.outputIndex
+  );
+
+  // Build the asset lock private key
+  const assetLockPrivateKey = PrivateKey.fromWIF(assetLockPrivateKeyWif);
+
+  // Empty signer — recipient does not need to sign for receiving
+  const signer = new PlatformAddressSigner();
+
+  console.log('Sending to platform address:', recipientAddress);
+
+  // Pass output as a plain object — the WASM serde deserializer expects
+  // { address: string } not a PlatformAddressOutput WASM instance
+  const result = await withRetry(
+    () => sdk.addresses.fundFromAssetLock({
+      assetLockProof,
+      assetLockPrivateKey,
+      outputs: [{ address: recipientAddress }] as any,
+      signer,
+      feeStrategy: [{ type: 'reduceOutput', index: 0 }] as any,
+    }),
+    retryOptions
+  );
+
+  console.log('Send to address result:', result);
+  if (result == null) {
+    throw new Error('Failed to send to platform address: fundFromAssetLock returned no result');
+  }
+  if (typeof result === 'object') {
+    const maybeResult = result as {
+      success?: unknown;
+      error?: unknown;
+      message?: unknown;
+    };
+
+    if (
+      maybeResult.success === false
+      || maybeResult.error !== undefined
+      || maybeResult.message !== undefined
+    ) {
+      const details = maybeResult.error ?? maybeResult.message ?? 'unknown error';
+      throw new Error(`Failed to send to platform address: ${String(details)}`);
+    }
+  }
+
+  return {
+    success: true,
+    recipientAddress,
+  };
 }
