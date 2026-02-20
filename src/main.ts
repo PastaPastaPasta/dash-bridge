@@ -109,6 +109,7 @@ let dapiClient: DAPIClient;
 const E2E_MOCK_IDENTITY_ID = '11111111111111111111111111111111111111111111';
 const E2E_MOCK_DPNS_WIF = 'cMockDpnsPrivateKeyWif';
 const E2E_MOCK_MANAGE_WIF = 'cMockManagePrivateKeyWif';
+type E2EMockWindow = Window & { __e2eMockAdvance?: () => void };
 
 function isE2EMockMode(): boolean {
   const urlParams = new URLSearchParams(window.location.search);
@@ -175,6 +176,20 @@ function createE2EMockDpnsResults(entries: DpnsUsernameEntry[]): DpnsRegistratio
       error: entry.label.toLowerCase().includes('fail') ? 'Mock registration failure' : undefined,
       isContested: entry.isContested ?? false,
     }));
+}
+
+function clearE2EMockAdvanceHook(): void {
+  (window as E2EMockWindow).__e2eMockAdvance = undefined;
+}
+
+function waitForE2EMockAdvance(): Promise<void> {
+  return new Promise((resolve) => {
+    const mockWindow = window as E2EMockWindow;
+    mockWindow.__e2eMockAdvance = () => {
+      mockWindow.__e2eMockAdvance = undefined;
+      resolve();
+    };
+  });
 }
 
 /**
@@ -1180,11 +1195,12 @@ async function startBridge() {
       const assetLockKeyPair = generateKeyPair();
       const depositAddress = publicKeyToAddress(assetLockKeyPair.publicKey, network);
 
+      clearE2EMockAdvanceHook();
       updateState(setStep(state, 'generating_keys'));
       await delay(120);
       updateState(setKeyPairs(state, assetLockKeyPair, depositAddress));
       updateState(setStep(state, 'detecting_deposit'));
-      await delay(120);
+      await waitForE2EMockAdvance();
       updateState(setUtxoDetected(state, createE2EMockUtxo()));
       await delay(120);
       updateState(setTransactionSigned(state, 'cd'.repeat(180)));
@@ -1307,6 +1323,7 @@ async function startBridge() {
     downloadKeyBackup(state);
 
   } catch (error) {
+    clearE2EMockAdvanceHook();
     console.error('Bridge error:', error);
     updateState(setError(state, error instanceof Error ? error : new Error(String(error))));
   }

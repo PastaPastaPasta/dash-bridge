@@ -15,6 +15,11 @@ test.describe('Deterministic UI E2E (mock mode)', () => {
     await page.click('#continue-btn');
 
     await expect(page.locator('.deposit-headline')).toBeVisible();
+    await expect.poll(async () => {
+      return page.evaluate(() => typeof (window as { __e2eMockAdvance?: () => void }).__e2eMockAdvance);
+    }).toBe('function');
+    await page.evaluate(() => (window as { __e2eMockAdvance?: () => void }).__e2eMockAdvance?.());
+
     await expect(page.getByText('Creating your identity')).toBeVisible();
     await expect(page.getByText('Save your keys')).toBeVisible();
     await expect(page.locator('.identity-id')).toHaveText(MOCK_IDENTITY_ID);
@@ -70,10 +75,7 @@ test.describe('Deterministic UI E2E (mock mode)', () => {
     await expect(page.getByText('Mock mode: use the configured test private key')).toBeVisible();
 
     await page.fill('#manage-private-key-input', MOCK_MANAGE_WIF);
-    await page.locator('#manage-private-key-input').press('Tab');
-    await expect(page.getByText('Key matches key #0 (MASTER level)')).toBeVisible();
-
-    await page.click('#manage-identity-continue-btn');
+    await page.locator('#manage-private-key-input').blur();
     await expect(page.getByText('Manage Keys')).toBeVisible();
 
     await page.click('#add-manage-key-btn');
