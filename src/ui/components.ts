@@ -363,46 +363,34 @@ function renderEnterIdentityStep(state: BridgeState): HTMLElement {
 
 function renderEnterPlatformAddressStep(state: BridgeState): HTMLElement {
   const div = document.createElement('div');
-  div.className = 'enter-identity-step enter-platform-address-step';
-
-  const headline = document.createElement('h2');
-  headline.textContent = 'Fund Platform Address';
-  div.appendChild(headline);
+  div.className = 'enter-identity-step';
 
   // Private key input
   const inputSection = document.createElement('div');
-  inputSection.className = 'identity-input-section platform-address-input-section';
+  inputSection.className = 'identity-input-section';
+  inputSection.innerHTML = `
+    <label class="input-label">Platform Address Private Key (WIF)</label>
+    <div class="password-input-wrapper">
+      <input
+        type="password"
+        id="platform-address-key-input"
+        class="identity-id-input platform-address-input"
+        placeholder="Enter your platform address private key in WIF format..."
+      />
+      <button
+        type="button"
+        id="toggle-key-visibility-btn"
+        class="toggle-visibility-btn"
+        title="Show/hide key"
+      >Show</button>
+    </div>
+    <p class="input-hint">The private key for the Platform address you want to fund</p>
+  `;
 
-  const keyGroup = document.createElement('div');
-  keyGroup.className = 'input-group';
-  keyGroup.innerHTML = '<label class="input-label">Platform Address Private Key (WIF)</label>';
-
-  const passwordWrapper = document.createElement('div');
-  passwordWrapper.className = 'password-input-wrapper';
-
-  const input = document.createElement('input');
-  input.type = 'password';
-  input.id = 'platform-address-key-input';
-  input.className = 'identity-id-input platform-address-input';
-  input.placeholder = 'Enter your platform address private key in WIF format...';
-  input.value = state.platformAddressPrivateKeyWif || '';
-  passwordWrapper.appendChild(input);
-
-  const toggleBtn = document.createElement('button');
-  toggleBtn.type = 'button';
-  toggleBtn.id = 'toggle-key-visibility-btn';
-  toggleBtn.className = 'toggle-visibility-btn';
-  toggleBtn.title = 'Show/hide key';
-  toggleBtn.textContent = 'Show';
-  passwordWrapper.appendChild(toggleBtn);
-
-  keyGroup.appendChild(passwordWrapper);
-
-  const hint = document.createElement('p');
-  hint.className = 'input-hint';
-  hint.textContent = 'The private key for the Platform address you want to fund';
-  keyGroup.appendChild(hint);
-  inputSection.appendChild(keyGroup);
+  const input = inputSection.querySelector('#platform-address-key-input') as HTMLInputElement;
+  if (input) {
+    input.value = state.platformAddressPrivateKeyWif || '';
+  }
 
   // Derived address display (shown after key is entered)
   if (state.platformAddress) {
@@ -472,37 +460,27 @@ function renderEnterPlatformAddressStep(state: BridgeState): HTMLElement {
 
 function renderEnterRecipientAddressStep(state: BridgeState): HTMLElement {
   const div = document.createElement('div');
-  div.className = 'enter-identity-step enter-recipient-address-step';
-
-  const headline = document.createElement('h2');
-  headline.textContent = 'Send to Platform Address';
-  div.appendChild(headline);
+  div.className = 'enter-identity-step';
 
   // Recipient address input
   const inputSection = document.createElement('div');
-  inputSection.className = 'identity-input-section recipient-address-input-section';
-
-  const addrGroup = document.createElement('div');
-  addrGroup.className = 'input-group';
-
+  inputSection.className = 'identity-input-section';
   const prefix = state.network === 'testnet' ? 'tdash1...' : 'dash1...';
   const prefixShort = state.network === 'testnet' ? 'tdash1' : 'dash1';
-  addrGroup.innerHTML = '<label class="input-label">Recipient Platform Address</label>';
-
-  const input = document.createElement('input');
-  input.type = 'text';
-  input.id = 'recipient-address-input';
-  input.className = 'identity-id-input recipient-address-input';
-  input.placeholder = prefix;
-  input.value = state.recipientPlatformAddress || '';
-  addrGroup.appendChild(input);
-
-  const hint = document.createElement('p');
-  hint.className = 'input-hint';
-  hint.textContent = `A bech32m platform address (starts with ${prefixShort})`;
-  addrGroup.appendChild(hint);
-
-  inputSection.appendChild(addrGroup);
+  inputSection.innerHTML = `
+    <label class="input-label">Recipient Platform Address</label>
+    <input
+      type="text"
+      id="recipient-address-input"
+      class="identity-id-input recipient-address-input"
+      placeholder="${prefix}"
+    />
+    <p class="input-hint">A bech32m platform address (starts with ${prefixShort})</p>
+  `;
+  const input = inputSection.querySelector('#recipient-address-input') as HTMLInputElement;
+  if (input) {
+    input.value = state.recipientPlatformAddress || '';
+  }
   div.appendChild(inputSection);
 
   // Validation message placeholder
@@ -564,7 +542,7 @@ function renderDepositStep(state: BridgeState): HTMLElement {
     const truncatedId = state.targetIdentityId.length > 12
       ? `${state.targetIdentityId.slice(0, 8)}...${state.targetIdentityId.slice(-4)}`
       : state.targetIdentityId;
-    headline.innerHTML = `Top up <code class="inline-id">${truncatedId}</code>`;
+    headline.innerHTML = `Top up <code class="inline-id">${escapeHtml(truncatedId)}</code>`;
   } else {
     headline.innerHTML = 'Send at least <strong>0.003 DASH</strong>';
   }
@@ -1016,13 +994,13 @@ export function createKeyBackup(state: BridgeState): string {
         }
       : null;
   } else {
-    // For top-up mode: include target identity and one-time key
+    // For top-up/fund_address/send_to_address modes: include one-time key for recovery
     backup.targetIdentityId = state.targetIdentityId;
     backup.assetLockKey = state.assetLockKeyPair
       ? {
           wif: privateKeyToWif(state.assetLockKeyPair.privateKey, network),
           publicKeyHex: bytesToHex(state.assetLockKeyPair.publicKey),
-          note: 'One-time key for top-up. Use this WIF to recover funds if top-up fails.',
+          note: 'One-time key. Use this WIF to recover funds if the operation fails.',
         }
       : null;
   }
