@@ -278,7 +278,7 @@ function setupEventListeners(container: HTMLElement) {
           msg.textContent = 'Invalid private key format. Please enter a valid WIF key.';
           msg.classList.remove('hidden');
         }
-        updateState(setPlatformAddress(state, '', ''));
+        updateState(setPlatformAddress(state, privateKeyWif, ''));
       }
     };
 
@@ -1237,7 +1237,11 @@ async function startFundAddress() {
       0
     );
 
-    updateState(setInstantLockReceived(state, islockBytes, assetLockProof));
+    updateState({
+      ...state,
+      instantLockBytes: islockBytes,
+      assetLockProof,
+    });
 
     // Step 7: Fund the platform address
     updateState(setStep(state, 'funding_address'));
@@ -1339,7 +1343,11 @@ async function startSendToAddress() {
       0
     );
 
-    updateState(setInstantLockReceived(state, islockBytes, assetLockProof));
+    updateState({
+      ...state,
+      instantLockBytes: islockBytes,
+      assetLockProof,
+    });
 
     // Step 7: Send to the recipient platform address
     updateState(setStep(state, 'sending_to_address'));
@@ -1561,7 +1569,15 @@ async function recheckDeposit() {
       0
     );
 
-    updateState(setInstantLockReceived(state, islockBytes, assetLockProof));
+    if (state.mode === 'fund_address' || state.mode === 'send_to_address') {
+      updateState({
+        ...state,
+        instantLockBytes: islockBytes,
+        assetLockProof,
+      });
+    } else {
+      updateState(setInstantLockReceived(state, islockBytes, assetLockProof));
+    }
 
     // Step 7: Mode-specific final operation
     const assetLockPrivateKeyWif = privateKeyToWif(
