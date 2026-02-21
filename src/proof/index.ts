@@ -1,5 +1,1 @@
-export {
-  type InstantAssetLockProof,
-  buildInstantAssetLockProof,
-  decodeAssetLockProof,
-} from './builder.js';
+export { buildInstantAssetLockProof } from './builder.js';

@@ -190,6 +190,12 @@ export interface RetryStatus {
   lastError?: string;
 }
 
+export interface AssetLockProofData {
+  transactionBytes: Uint8Array;
+  instantLockBytes: Uint8Array;
+  outputIndex: number;
+}
+
 export interface BridgeState {
   step: BridgeStep;
   network: 'testnet' | 'mainnet';
@@ -208,7 +214,7 @@ export interface BridgeState {
   signedTxHex?: string;
   txid?: string;
   instantLockBytes?: Uint8Array;
-  assetLockProof?: string;
+  assetLockProof?: AssetLockProofData;
   identityId?: string;
   error?: Error;
   /** True when deposit detection timed out and needs manual recheck */
