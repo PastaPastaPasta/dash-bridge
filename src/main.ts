@@ -92,27 +92,35 @@ import {
   generateIdentityKey,
 } from './crypto/keys.js';
 import type {
+  BridgeState,
   KeyType,
   KeyPurpose,
   SecurityLevel,
+  UTXO,
   ManageNewKeyConfig,
   DpnsUsernameEntry,
   DpnsRegistrationResult,
   IdentityPublicKeyInfo,
 } from './types.js';
-import type { BridgeState } from './types.js';
+import {
+  E2E_MOCK_DPNS_WIF,
+  E2E_MOCK_IDENTITY_ID,
+  E2E_MOCK_MANAGE_WIF,
+} from './e2e-mock-constants.js';
 
 // Global state
 let state: BridgeState;
 let insightClient: InsightClient;
 let dapiClient: DAPIClient;
 
-const E2E_MOCK_IDENTITY_ID = '11111111111111111111111111111111111111111111';
-const E2E_MOCK_DPNS_WIF = 'cMockDpnsPrivateKeyWif';
-const E2E_MOCK_MANAGE_WIF = 'cMockManagePrivateKeyWif';
+const E2E_MOCK_ADVANCE_TIMEOUT_MS = 30000;
+const E2E_MOCK_BUILD_ENABLED = !import.meta.env.PROD;
 type E2EMockWindow = Window & { __e2eMockAdvance?: () => void };
 
 function isE2EMockMode(): boolean {
+  if (!E2E_MOCK_BUILD_ENABLED) {
+    return false;
+  }
   const urlParams = new URLSearchParams(window.location.search);
   return urlParams.get('e2e') === 'mock';
 }
@@ -121,7 +129,7 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function createE2EMockUtxo(): import('./types.js').UTXO {
+function createE2EMockUtxo(): UTXO {
   return {
     txid: 'a'.repeat(64),
     vout: 0,
@@ -159,11 +167,13 @@ function createE2EMockDpnsAvailability(entries: DpnsUsernameEntry[]): DpnsUserna
     }
 
     const lower = entry.label.toLowerCase();
+    const normalizedLabel = entry.normalizedLabel || lower;
     const isAvailable = !lower.includes('taken');
     return {
       ...entry,
+      normalizedLabel,
       isAvailable,
-      isContested: isAvailable ? isContestedUsername(lower) : undefined,
+      isContested: isAvailable ? isContestedUsername(normalizedLabel) : undefined,
       status: isAvailable ? 'available' : 'taken',
     };
   });
@@ -184,13 +194,28 @@ function clearE2EMockAdvanceHook(): void {
   (window as E2EMockWindow).__e2eMockAdvance = undefined;
 }
 
-function waitForE2EMockAdvance(): Promise<void> {
-  return new Promise((resolve) => {
+function waitForE2EMockAdvance(timeoutMs = E2E_MOCK_ADVANCE_TIMEOUT_MS): Promise<void> {
+  return new Promise((resolve, reject) => {
     const mockWindow = window as E2EMockWindow;
-    mockWindow.__e2eMockAdvance = () => {
-      mockWindow.__e2eMockAdvance = undefined;
+    let timeoutId = 0;
+
+    const cleanup = () => {
+      window.clearTimeout(timeoutId);
+      if (mockWindow.__e2eMockAdvance === resolveAdvance) {
+        mockWindow.__e2eMockAdvance = undefined;
+      }
+    };
+
+    const resolveAdvance = () => {
+      cleanup();
       resolve();
     };
+
+    mockWindow.__e2eMockAdvance = resolveAdvance;
+    timeoutId = window.setTimeout(() => {
+      cleanup();
+      reject(new Error(`Timed out waiting for E2E mock advance after ${timeoutMs}ms`));
+    }, timeoutMs);
   });
 }
 
@@ -1070,6 +1095,7 @@ async function startTopUp() {
       await delay(120);
       updateState(setOneTimeKeyPair(state, assetLockKeyPair, depositAddress));
       updateState(setStep(state, 'detecting_deposit'));
+      clearE2EMockAdvanceHook();
       await waitForE2EMockAdvance();
       updateState(setUtxoDetected(state, createE2EMockUtxo()));
       await delay(120);
@@ -1182,6 +1208,9 @@ async function startTopUp() {
     updateState(setTopUpComplete(state));
 
   } catch (error) {
+    if (isE2EMockMode()) {
+      clearE2EMockAdvanceHook();
+    }
     console.error('Top-up error:', error);
     updateState(setError(state, error instanceof Error ? error : new Error(String(error))));
   }
@@ -1325,7 +1354,9 @@ async function startBridge() {
     downloadKeyBackup(state);
 
   } catch (error) {
-    clearE2EMockAdvanceHook();
+    if (isE2EMockMode()) {
+      clearE2EMockAdvanceHook();
+    }
     console.error('Bridge error:', error);
     updateState(setError(state, error instanceof Error ? error : new Error(String(error))));
   }

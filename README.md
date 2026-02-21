@@ -51,14 +51,23 @@ npm run test:e2e:headed
 ### Optional live testnet E2E
 
 Live suite is opt-in and skips when required variables are missing.
+Never paste real private keys directly inline in shell commands. Inline secrets are saved in shell history.
 
 ```bash
-PW_E2E_LIVE=1 \
-PW_LIVE_TOPUP_IDENTITY_ID=<44-char-base58-id> \
-PW_LIVE_DPNS_IDENTITY_ID=<44-char-base58-id> \
-PW_LIVE_DPNS_PRIVATE_KEY_WIF=<wif-auth-key> \
-PW_LIVE_MANAGE_IDENTITY_ID=<44-char-base58-id> \
-PW_LIVE_MANAGE_PRIVATE_KEY_WIF=<wif-master-key> \
+# Safer approach: store sensitive values in a protected env file and source it
+cat > .env.playwright-live <<'EOF'
+PW_E2E_LIVE=1
+PW_LIVE_TOPUP_IDENTITY_ID=<44-char-base58-id>
+PW_LIVE_DPNS_IDENTITY_ID=<44-char-base58-id>
+PW_LIVE_DPNS_PRIVATE_KEY_WIF=<wif-auth-key>
+PW_LIVE_MANAGE_IDENTITY_ID=<44-char-base58-id>
+PW_LIVE_MANAGE_PRIVATE_KEY_WIF=<wif-master-key>
+EOF
+
+chmod 600 .env.playwright-live
+set -a
+source .env.playwright-live
+set +a
 npm run test:e2e:live
 ```
 
@@ -67,7 +76,7 @@ Environment variables used by the live suite:
 - `PW_E2E_LIVE`: set to `1` to enable live tests.
 - `PW_LIVE_TOPUP_IDENTITY_ID`: identity ID used for top-up navigation check.
 - `PW_LIVE_DPNS_IDENTITY_ID`: identity ID used for DPNS key validation.
-- `PW_LIVE_DPNS_PRIVATE_KEY_WIF`: DPNS AUTHENTICATION key (CRITICAL/HIGH) for that identity.
+- `PW_LIVE_DPNS_PRIVATE_KEY_WIF`: DPNS AUTHENTICATION key for that identity. Prefer CRITICAL; HIGH is also accepted.
 - `PW_LIVE_MANAGE_IDENTITY_ID`: identity ID used for key-management validation.
 - `PW_LIVE_MANAGE_PRIVATE_KEY_WIF`: MASTER key for identity-management validation.
 - `PLAYWRIGHT_BASE_URL` (optional): override app URL if running against a pre-started server.

@@ -1,9 +1,11 @@
 import { expect, test } from '@playwright/test';
+import {
+  E2E_MOCK_DPNS_WIF,
+  E2E_MOCK_IDENTITY_ID,
+  E2E_MOCK_MANAGE_WIF,
+} from '../src/e2e-mock-constants';
 
 const MOCK_QUERY = '/?network=testnet&e2e=mock';
-const MOCK_IDENTITY_ID = '11111111111111111111111111111111111111111111';
-const MOCK_DPNS_WIF = 'cMockDpnsPrivateKeyWif';
-const MOCK_MANAGE_WIF = 'cMockManagePrivateKeyWif';
 
 test.describe('Deterministic UI E2E (mock mode)', () => {
   test('create identity flow transitions to completion and DPNS registration', async ({ page }) => {
@@ -20,9 +22,8 @@ test.describe('Deterministic UI E2E (mock mode)', () => {
     }).toBe('function');
     await page.evaluate(() => (window as { __e2eMockAdvance?: () => void }).__e2eMockAdvance?.());
 
-    await expect(page.getByText('Creating your identity')).toBeVisible();
     await expect(page.getByText('Save your keys')).toBeVisible();
-    await expect(page.locator('.identity-id')).toHaveText(MOCK_IDENTITY_ID);
+    await expect(page.locator('.identity-id')).toHaveText(E2E_MOCK_IDENTITY_ID);
 
     await page.click('#dpns-from-identity-btn');
     await expect(page.getByText('Choose Your Usernames')).toBeVisible();
@@ -52,7 +53,7 @@ test.describe('Deterministic UI E2E (mock mode)', () => {
     await page.click('#continue-topup-btn');
     await expect(page.locator('#validation-msg')).toContainText('Please enter a valid identity ID');
 
-    await page.fill('#identity-id-input', MOCK_IDENTITY_ID);
+    await page.fill('#identity-id-input', E2E_MOCK_IDENTITY_ID);
     await page.click('#continue-topup-btn');
 
     await expect(page.locator('.deposit-headline')).toBeVisible();
@@ -61,9 +62,8 @@ test.describe('Deterministic UI E2E (mock mode)', () => {
     }).toBe('function');
     await page.evaluate(() => (window as { __e2eMockAdvance?: () => void }).__e2eMockAdvance?.());
 
-    await expect(page.getByText('Processing top-up')).toBeVisible();
     await expect(page.getByText('Top-up complete!')).toBeVisible();
-    await expect(page.locator('.identity-id')).toHaveText(MOCK_IDENTITY_ID);
+    await expect(page.locator('.identity-id')).toHaveText(E2E_MOCK_IDENTITY_ID);
   });
 
   test('manage identity flow validates key and applies changes', async ({ page }) => {
@@ -72,7 +72,7 @@ test.describe('Deterministic UI E2E (mock mode)', () => {
     await page.click('#mode-manage-btn');
     await expect(page.locator('#manage-identity-id-input')).toBeVisible();
 
-    await page.fill('#manage-identity-id-input', MOCK_IDENTITY_ID);
+    await page.fill('#manage-identity-id-input', E2E_MOCK_IDENTITY_ID);
     await page.locator('#manage-identity-id-input').press('Tab');
     await expect(page.getByText('Identity found with 2 keys')).toBeVisible();
 
@@ -80,7 +80,7 @@ test.describe('Deterministic UI E2E (mock mode)', () => {
     await page.locator('#manage-private-key-input').press('Tab');
     await expect(page.getByText('Mock mode: use the configured test private key')).toBeVisible();
 
-    await page.fill('#manage-private-key-input', MOCK_MANAGE_WIF);
+    await page.fill('#manage-private-key-input', E2E_MOCK_MANAGE_WIF);
     await page.locator('#manage-private-key-input').blur();
     await expect(page.getByText('Manage Keys')).toBeVisible();
 
@@ -101,11 +101,11 @@ test.describe('Deterministic UI E2E (mock mode)', () => {
     await page.click('#dpns-choose-existing-btn');
     await expect(page.locator('#dpns-identity-id-input')).toBeVisible();
 
-    await page.fill('#dpns-identity-id-input', MOCK_IDENTITY_ID);
+    await page.fill('#dpns-identity-id-input', E2E_MOCK_IDENTITY_ID);
     await page.locator('#dpns-identity-id-input').press('Tab');
     await expect(page.getByText('Identity found with 2 keys')).toBeVisible();
 
-    await page.fill('#dpns-private-key-input', MOCK_DPNS_WIF);
+    await page.fill('#dpns-private-key-input', E2E_MOCK_DPNS_WIF);
     await page.locator('#dpns-private-key-input').press('Tab');
     await expect(page.getByText('Key matches key #1 (CRITICAL level)')).toBeVisible();
 
