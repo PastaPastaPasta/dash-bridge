@@ -101,6 +101,7 @@ import type {
   DpnsUsernameEntry,
   DpnsRegistrationResult,
   IdentityPublicKeyInfo,
+  E2EMockWindow,
 } from './types.js';
 import {
   E2E_MOCK_DPNS_WIF,
@@ -115,7 +116,6 @@ let dapiClient: DAPIClient;
 
 const E2E_MOCK_ADVANCE_TIMEOUT_MS = 30000;
 const E2E_MOCK_BUILD_ENABLED = !import.meta.env.PROD;
-type E2EMockWindow = Window & { __e2eMockAdvance?: () => void };
 
 function isE2EMockMode(): boolean {
   if (!E2E_MOCK_BUILD_ENABLED) {
@@ -1035,6 +1035,12 @@ function setupEventListeners(container: HTMLElement) {
       // Capture the intermediate state to use after async operation
       const refreshedState = resetManageStateAndRefresh(state);
       updateState(refreshedState);
+
+      if (isE2EMockMode()) {
+        await delay(30);
+        updateState(setManageIdentityFetched(refreshedState, createE2EMockIdentityKeys()));
+        return;
+      }
 
       // Refetch identity keys from the network
       const targetId = refreshedState.targetIdentityId;

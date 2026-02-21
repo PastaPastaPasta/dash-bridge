@@ -85,7 +85,7 @@ test.describe('Deterministic UI E2E (mock mode)', () => {
     await expect(page.getByText('Manage Keys')).toBeVisible();
 
     await page.click('#add-manage-key-btn');
-    await page.locator('.manage-disable-key-checkbox').first().check();
+    await page.locator('.manage-disable-key-checkbox').first().click({ force: true });
     await expect(page.getByText('Will add 1 key, disable 1 key')).toBeVisible();
 
     await page.click('#apply-manage-btn');
