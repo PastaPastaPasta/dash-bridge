@@ -5,7 +5,8 @@ import { createAssetLockTransaction, serializeTransaction } from './transaction/
 import { InsightClient } from './api/insight.js';
 import { DAPIClient } from './api/dapi.js';
 import { buildInstantAssetLockProof } from './proof/index.js';
-import { registerIdentity, topUpIdentity, updateIdentity, AddKeyConfig } from './platform/index.js';
+import { registerIdentity, topUpIdentity, updateIdentity, fundPlatformAddress, sendToPlatformAddress, AddKeyConfig } from './platform/index.js';
+import { PrivateKey, PlatformAddress, PlatformAddressSigner } from '@dashevo/evo-sdk';
 import { privateKeyToWif, bytesToHex } from './utils/index.js';
 import {
   createInitialState,
@@ -15,6 +16,10 @@ import {
   setTargetIdentityId,
   setOneTimeKeyPair,
   setTopUpComplete,
+  setPlatformAddress,
+  setFundAddressComplete,
+  setRecipientPlatformAddress,
+  setSendToAddressComplete,
   setUtxoDetected,
   setTransactionSigned,
   setTransactionBroadcast,
@@ -202,6 +207,22 @@ function setupEventListeners(container: HTMLElement) {
     });
   }
 
+  // Fund Platform Address mode button (init page)
+  const modeFundAddressBtn = container.querySelector('#mode-fund-address-btn');
+  if (modeFundAddressBtn) {
+    modeFundAddressBtn.addEventListener('click', () => {
+      updateState(setMode(state, 'fund_address'));
+    });
+  }
+
+  // Send to Platform Address mode button (init page)
+  const modeSendToAddressBtn = container.querySelector('#mode-send-to-address-btn');
+  if (modeSendToAddressBtn) {
+    modeSendToAddressBtn.addEventListener('click', () => {
+      updateState(setMode(state, 'send_to_address'));
+    });
+  }
+
   // Back button (configure keys or enter identity -> init)
   const backBtn = container.querySelector('#back-btn');
   if (backBtn) {
@@ -227,6 +248,92 @@ function setupEventListeners(container: HTMLElement) {
         startTopUp();
       } else {
         showValidationError('Please enter a valid identity ID (44 character Base58 string)');
+      }
+    });
+  }
+
+  // Platform address private key input - validate on blur or paste
+  const platformAddressKeyInput = container.querySelector('#platform-address-key-input');
+  if (platformAddressKeyInput) {
+    const validatePlatformKey = () => {
+      const input = platformAddressKeyInput as HTMLInputElement;
+      const privateKeyWif = input.value.trim();
+
+      if (!privateKeyWif) {
+        updateState(setPlatformAddress(state, '', ''));
+        return;
+      }
+
+      try {
+        const privKey = PrivateKey.fromWIF(privateKeyWif);
+        const signer = new PlatformAddressSigner();
+        const platformAddr = signer.addKey(privKey);
+        const bech32mAddress = platformAddr.toBech32m(state.network);
+
+        updateState(setPlatformAddress(state, privateKeyWif, bech32mAddress));
+      } catch (error) {
+        // Show validation error
+        const msg = document.getElementById('platform-address-validation-msg');
+        if (msg) {
+          msg.textContent = 'Invalid private key format. Please enter a valid WIF key.';
+          msg.classList.remove('hidden');
+        }
+        updateState(setPlatformAddress(state, privateKeyWif, ''));
+      }
+    };
+
+    platformAddressKeyInput.addEventListener('blur', validatePlatformKey);
+    platformAddressKeyInput.addEventListener('paste', () => {
+      setTimeout(validatePlatformKey, 50);
+    });
+  }
+
+  // Toggle key visibility button
+  const toggleVisibilityBtn = container.querySelector('#toggle-key-visibility-btn');
+  if (toggleVisibilityBtn) {
+    toggleVisibilityBtn.addEventListener('click', () => {
+      const input = container.querySelector('#platform-address-key-input') as HTMLInputElement;
+      if (input) {
+        const isPassword = input.type === 'password';
+        input.type = isPassword ? 'text' : 'password';
+        toggleVisibilityBtn.textContent = isPassword ? 'Hide' : 'Show';
+      }
+    });
+  }
+
+  // Continue fund address button
+  const continueFundAddressBtn = container.querySelector('#continue-fund-address-btn');
+  if (continueFundAddressBtn) {
+    continueFundAddressBtn.addEventListener('click', () => {
+      if (state.platformAddressPrivateKeyWif && state.platformAddress) {
+        startFundAddress();
+      }
+    });
+  }
+
+  // Recipient platform address input (send_to_address mode)
+  const recipientAddressInput = container.querySelector('#recipient-address-input');
+  if (recipientAddressInput) {
+    recipientAddressInput.addEventListener('input', (e) => {
+      const value = (e.target as HTMLInputElement).value.trim();
+      updateState(setRecipientPlatformAddress(state, value));
+    });
+  }
+
+  // Continue send to address button
+  const continueSendToAddressBtn = container.querySelector('#continue-send-to-address-btn');
+  if (continueSendToAddressBtn) {
+    continueSendToAddressBtn.addEventListener('click', () => {
+      const address = state.recipientPlatformAddress;
+      if (address && validatePlatformAddress(address, state.network)) {
+        startSendToAddress();
+      } else {
+        const prefix = state.network === 'testnet' ? 'tdash1' : 'dash1';
+        const msg = document.getElementById('recipient-address-validation-msg');
+        if (msg) {
+          msg.textContent = `Please enter a valid bech32m platform address (starts with ${prefix})`;
+          msg.classList.remove('hidden');
+        }
       }
     });
   }
@@ -920,6 +1027,21 @@ function validateIdentityId(id?: string): boolean {
 }
 
 /**
+ * Validate platform address format (bech32m, correct network prefix)
+ */
+function validatePlatformAddress(address: string, network: 'testnet' | 'mainnet'): boolean {
+  const trimmed = address.trim();
+  if (!trimmed) return false;
+
+  try {
+    const parsed = PlatformAddress.fromBech32m(trimmed);
+    return parsed.toBech32m(network) === trimmed;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Show validation error message in the UI
  */
 function showValidationError(message: string): void {
@@ -1034,6 +1156,218 @@ async function startTopUp() {
 
   } catch (error) {
     console.error('Top-up error:', error);
+    updateState(setError(state, error instanceof Error ? error : new Error(String(error))));
+  }
+}
+
+/**
+ * Start the fund-platform-address process (asset lock → fund platform address)
+ */
+async function startFundAddress() {
+  try {
+    const network = getNetwork(state.network);
+
+    // Step 1: Generate random one-time key pair (NOT HD-derived)
+    updateState(setStep(state, 'generating_keys'));
+
+    const assetLockKeyPair = generateKeyPair();
+    const depositAddress = publicKeyToAddress(assetLockKeyPair.publicKey, network);
+
+    const stateWithKeys = setOneTimeKeyPair(state, assetLockKeyPair, depositAddress);
+    updateState(stateWithKeys);
+
+    // Auto-download key backup for safety
+    downloadKeyBackup(stateWithKeys);
+
+    // Step 2: Wait for deposit
+    updateState(setStep(stateWithKeys, 'detecting_deposit'));
+
+    const minAmount = 300000; // 0.003 DASH minimum
+    const depositResult = await insightClient.waitForUtxo(
+      depositAddress,
+      minAmount,
+      120000,
+      3000
+    );
+
+    if (!depositResult.utxo) {
+      updateState(setDepositTimedOut(state, true, depositResult.totalAmount));
+      return;
+    }
+
+    const utxo = depositResult.utxo;
+    updateState(setUtxoDetected(state, utxo));
+
+    // Step 3: Build transaction
+    updateState(setStep(state, 'building_transaction'));
+
+    const tx = createAssetLockTransaction(
+      utxo,
+      assetLockKeyPair.publicKey,
+      BigInt(network.minFee)
+    );
+
+    // Step 4: Sign transaction
+    updateState(setStep(state, 'signing_transaction'));
+
+    const signedTx = await signTransaction(
+      tx,
+      [utxo],
+      assetLockKeyPair.privateKey,
+      assetLockKeyPair.publicKey
+    );
+
+    const signedTxBytes = serializeTransaction(signedTx);
+    const signedTxHex = bytesToHex(signedTxBytes);
+
+    updateState(setTransactionSigned(state, signedTxHex));
+
+    // Step 5: Broadcast transaction
+    const txid = await insightClient.broadcastTransaction(signedTxHex);
+    updateState(setTransactionBroadcast(state, txid));
+
+    // Step 6: Wait for InstantSend lock
+    updateState(setStep(state, 'waiting_islock'));
+
+    const islockBytes = await dapiClient.waitForInstantSendLock(txid, 60000);
+
+    const assetLockProof = buildInstantAssetLockProof(
+      signedTxBytes,
+      islockBytes,
+      0
+    );
+
+    updateState({
+      ...state,
+      instantLockBytes: islockBytes,
+      assetLockProof,
+    });
+
+    // Step 7: Fund the platform address
+    updateState(setStep(state, 'funding_address'));
+
+    const assetLockPrivateKeyWif = privateKeyToWif(
+      assetLockKeyPair.privateKey,
+      network
+    );
+
+    await fundPlatformAddress(
+      state.platformAddressPrivateKeyWif!,
+      assetLockProof,
+      assetLockPrivateKeyWif,
+      state.network
+    );
+
+    updateState(setFundAddressComplete(state));
+
+  } catch (error) {
+    console.error('Fund platform address error:', error);
+    updateState(setError(state, error instanceof Error ? error : new Error(String(error))));
+  }
+}
+
+/**
+ * Start the send-to-platform-address process (asset lock → send to recipient address)
+ */
+async function startSendToAddress() {
+  try {
+    const network = getNetwork(state.network);
+
+    // Step 1: Generate random one-time key pair
+    updateState(setStep(state, 'generating_keys'));
+
+    const assetLockKeyPair = generateKeyPair();
+    const depositAddress = publicKeyToAddress(assetLockKeyPair.publicKey, network);
+
+    const stateWithKeys = setOneTimeKeyPair(state, assetLockKeyPair, depositAddress);
+    updateState(stateWithKeys);
+
+    // Auto-download key backup for safety
+    downloadKeyBackup(stateWithKeys);
+
+    // Step 2: Wait for deposit
+    updateState(setStep(stateWithKeys, 'detecting_deposit'));
+
+    const minAmount = 300000; // 0.003 DASH minimum
+    const depositResult = await insightClient.waitForUtxo(
+      depositAddress,
+      minAmount,
+      120000,
+      3000
+    );
+
+    if (!depositResult.utxo) {
+      updateState(setDepositTimedOut(state, true, depositResult.totalAmount));
+      return;
+    }
+
+    const utxo = depositResult.utxo;
+    updateState(setUtxoDetected(state, utxo));
+
+    // Step 3: Build transaction
+    updateState(setStep(state, 'building_transaction'));
+
+    const tx = createAssetLockTransaction(
+      utxo,
+      assetLockKeyPair.publicKey,
+      BigInt(network.minFee)
+    );
+
+    // Step 4: Sign transaction
+    updateState(setStep(state, 'signing_transaction'));
+
+    const signedTx = await signTransaction(
+      tx,
+      [utxo],
+      assetLockKeyPair.privateKey,
+      assetLockKeyPair.publicKey
+    );
+
+    const signedTxBytes = serializeTransaction(signedTx);
+    const signedTxHex = bytesToHex(signedTxBytes);
+
+    updateState(setTransactionSigned(state, signedTxHex));
+
+    // Step 5: Broadcast transaction
+    const txid = await insightClient.broadcastTransaction(signedTxHex);
+    updateState(setTransactionBroadcast(state, txid));
+
+    // Step 6: Wait for InstantSend lock
+    updateState(setStep(state, 'waiting_islock'));
+
+    const islockBytes = await dapiClient.waitForInstantSendLock(txid, 60000);
+
+    const assetLockProof = buildInstantAssetLockProof(
+      signedTxBytes,
+      islockBytes,
+      0
+    );
+
+    updateState({
+      ...state,
+      instantLockBytes: islockBytes,
+      assetLockProof,
+    });
+
+    // Step 7: Send to the recipient platform address
+    updateState(setStep(state, 'sending_to_address'));
+
+    const assetLockPrivateKeyWif = privateKeyToWif(
+      assetLockKeyPair.privateKey,
+      network
+    );
+
+    await sendToPlatformAddress(
+      state.recipientPlatformAddress!,
+      assetLockProof,
+      assetLockPrivateKeyWif,
+      state.network
+    );
+
+    updateState(setSendToAddressComplete(state));
+
+  } catch (error) {
+    console.error('Send to platform address error:', error);
     updateState(setError(state, error instanceof Error ? error : new Error(String(error))));
   }
 }
@@ -1235,27 +1569,62 @@ async function recheckDeposit() {
       0
     );
 
-    updateState(setInstantLockReceived(state, islockBytes, assetLockProof));
+    if (state.mode === 'fund_address' || state.mode === 'send_to_address') {
+      updateState({
+        ...state,
+        instantLockBytes: islockBytes,
+        assetLockProof,
+      });
+    } else {
+      updateState(setInstantLockReceived(state, islockBytes, assetLockProof));
+    }
 
-    // Step 7: Register identity
-    updateState(setStep(state, 'registering_identity'));
-
+    // Step 7: Mode-specific final operation
     const assetLockPrivateKeyWif = privateKeyToWif(
       assetLockKeyPair.privateKey,
       network
     );
 
-    const result = await registerIdentity(
-      assetLockProof,
-      assetLockPrivateKeyWif,
-      state.identityKeys,
-      state.network
-    );
-
-    updateState(setIdentityRegistered(state, result.identityId));
-
-    // Auto-download final key backup on "Save your keys" page
-    downloadKeyBackup(state);
+    if (state.mode === 'topup') {
+      updateState(setStep(state, 'topping_up'));
+      await topUpIdentity(
+        state.targetIdentityId!,
+        assetLockProof,
+        assetLockPrivateKeyWif,
+        state.network
+      );
+      updateState(setTopUpComplete(state));
+    } else if (state.mode === 'fund_address') {
+      updateState(setStep(state, 'funding_address'));
+      await fundPlatformAddress(
+        state.platformAddressPrivateKeyWif!,
+        assetLockProof,
+        assetLockPrivateKeyWif,
+        state.network
+      );
+      updateState(setFundAddressComplete(state));
+    } else if (state.mode === 'send_to_address') {
+      updateState(setStep(state, 'sending_to_address'));
+      await sendToPlatformAddress(
+        state.recipientPlatformAddress!,
+        assetLockProof,
+        assetLockPrivateKeyWif,
+        state.network
+      );
+      updateState(setSendToAddressComplete(state));
+    } else {
+      // Default: create mode — register identity
+      updateState(setStep(state, 'registering_identity'));
+      const result = await registerIdentity(
+        assetLockProof,
+        assetLockPrivateKeyWif,
+        state.identityKeys,
+        state.network
+      );
+      updateState(setIdentityRegistered(state, result.identityId));
+      // Auto-download final key backup on "Save your keys" page
+      downloadKeyBackup(state);
+    }
 
   } catch (error) {
     console.error('Bridge error:', error);

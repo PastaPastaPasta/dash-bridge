@@ -5,6 +5,8 @@ import {
   IdentityPublicKey,
   IdentityPublicKeyInCreation,
   IdentitySigner,
+  PlatformAddressSigner,
+  PlatformAddressOutput,
   PrivateKey,
 } from '@dashevo/evo-sdk';
 import { sha256 } from '@noble/hashes/sha256';
@@ -395,4 +397,164 @@ export async function updateIdentity(
       error: errorMessage,
     };
   }
+}
+
+/**
+ * Fund a Platform address from an asset lock
+ *
+ * Very similar to topUp, but sends credits to a Platform address
+ * instead of an identity. Uses sdk.addresses.fundFromAssetLock().
+ */
+export async function fundPlatformAddress(
+  platformAddressPrivateKeyWif: string,
+  assetLockProofData: AssetLockProofData,
+  assetLockPrivateKeyWif: string,
+  network: 'testnet' | 'mainnet',
+  retryOptions?: RetryOptions
+): Promise<{ success: boolean; address?: string }> {
+  const sdk = network === 'mainnet'
+    ? EvoSDK.mainnetTrusted()
+    : EvoSDK.testnetTrusted();
+
+  console.log(`Connecting to ${network}...`);
+  await withRetry(() => sdk.connect(), retryOptions);
+  console.log('Connected to Platform');
+
+  // Build typed AssetLockProof from raw components
+  const assetLockProof = AssetLockProof.createInstantAssetLockProof(
+    assetLockProofData.instantLockBytes,
+    assetLockProofData.transactionBytes,
+    assetLockProofData.outputIndex
+  );
+
+  // Build the asset lock private key
+  const assetLockPrivateKey = PrivateKey.fromWIF(assetLockPrivateKeyWif);
+
+  // Build the signer with the platform address private key
+  const signer = new PlatformAddressSigner();
+  const addressPrivateKey = PrivateKey.fromWIF(platformAddressPrivateKeyWif);
+  const platformAddr = signer.addKey(addressPrivateKey);
+
+  // Create output (no amount = send all remaining after fees)
+  const output = new PlatformAddressOutput(platformAddr);
+
+  console.log('Funding platform address:', platformAddr.toBech32m(network));
+
+  const result = await withRetry(
+    () => sdk.addresses.fundFromAssetLock({
+      assetLockProof,
+      assetLockPrivateKey,
+      outputs: [output],
+      signer,
+    }),
+    retryOptions
+  );
+
+  console.log('Fund address result:', result);
+  if (result == null) {
+    throw new Error('Failed to fund platform address: fundFromAssetLock returned no result');
+  }
+  if (typeof result === 'object') {
+    const maybeResult = result as {
+      success?: unknown;
+      error?: unknown;
+      message?: unknown;
+    };
+
+    if (
+      maybeResult.success === false
+      || maybeResult.error !== undefined
+      || maybeResult.message !== undefined
+    ) {
+      const details = maybeResult.error ?? maybeResult.message ?? 'unknown error';
+      throw new Error(`Failed to fund platform address: ${String(details)}`);
+    }
+  }
+
+  return {
+    success: true,
+    address: platformAddr.toBech32m(network),
+  };
+}
+
+/**
+ * Send credits to an arbitrary Platform address from an asset lock
+ *
+ * Unlike fundPlatformAddress which requires the private key of the destination,
+ * this function accepts any bech32m platform address as the recipient.
+ * Uses sdk.addresses.fundFromAssetLock() with an empty PlatformAddressSigner
+ * since we don't have (or need) the recipient's private key.
+ *
+ * TODO: If PlatformAddressSigner() fails without keys at runtime, this may
+ * need adjustment. The assumption is that creating NEW credits for an address
+ * does not require the recipient to sign.
+ */
+export async function sendToPlatformAddress(
+  recipientAddress: string,
+  assetLockProofData: AssetLockProofData,
+  assetLockPrivateKeyWif: string,
+  network: 'testnet' | 'mainnet',
+  retryOptions?: RetryOptions
+): Promise<{ success: boolean; recipientAddress: string }> {
+  const sdk = network === 'mainnet'
+    ? EvoSDK.mainnetTrusted()
+    : EvoSDK.testnetTrusted();
+
+  console.log(`Connecting to ${network}...`);
+  await withRetry(() => sdk.connect(), retryOptions);
+  console.log('Connected to Platform');
+
+  // Build typed AssetLockProof from raw components
+  const assetLockProof = AssetLockProof.createInstantAssetLockProof(
+    assetLockProofData.instantLockBytes,
+    assetLockProofData.transactionBytes,
+    assetLockProofData.outputIndex
+  );
+
+  // Build the asset lock private key
+  const assetLockPrivateKey = PrivateKey.fromWIF(assetLockPrivateKeyWif);
+
+  // Empty signer — recipient does not need to sign for receiving
+  const signer = new PlatformAddressSigner();
+
+  // Create output with the recipient bech32m address directly (no amount = all remaining after fees)
+  const output = new PlatformAddressOutput(recipientAddress);
+
+  console.log('Sending to platform address:', recipientAddress);
+
+  const result = await withRetry(
+    () => sdk.addresses.fundFromAssetLock({
+      assetLockProof,
+      assetLockPrivateKey,
+      outputs: [output],
+      signer,
+    }),
+    retryOptions
+  );
+
+  console.log('Send to address result:', result);
+  if (result == null) {
+    throw new Error('Failed to send to platform address: fundFromAssetLock returned no result');
+  }
+  if (typeof result === 'object') {
+    const maybeResult = result as {
+      success?: unknown;
+      error?: unknown;
+      message?: unknown;
+    };
+
+    if (
+      maybeResult.success === false
+      || maybeResult.error !== undefined
+      || maybeResult.message !== undefined
+    ) {
+      const details = maybeResult.error ?? maybeResult.message ?? 'unknown error';
+      throw new Error(`Failed to send to platform address: ${String(details)}`);
+    }
+  }
+
+  return {
+    success: true,
+    recipientAddress,
+  };
 }
