@@ -3,6 +3,8 @@ export {
   setStep,
   setKeyPairs,
   setMode,
+  setMnemonicGenerated,
+  setMnemonicImported,
   setTargetIdentityId,
   setOneTimeKeyPair,
   setTopUpComplete,

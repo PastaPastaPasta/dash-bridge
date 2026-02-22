@@ -78,6 +78,10 @@ export function render(state: BridgeState, container: HTMLElement): void {
       content.appendChild(renderInitStep(state));
       break;
 
+    case 'mnemonic_input':
+      content.appendChild(renderMnemonicInputStep(state));
+      break;
+
     case 'configure_keys':
       content.appendChild(renderConfigureKeysStep(state));
       break;
@@ -215,6 +219,86 @@ function renderInitStep(state: BridgeState): HTMLElement {
     </button>
   `;
   div.appendChild(modeButtons);
+
+  return div;
+}
+
+function renderMnemonicInputStep(state: BridgeState): HTMLElement {
+  const div = document.createElement('div');
+  div.className = 'mnemonic-input-step';
+
+  const headline = document.createElement('h2');
+  headline.className = 'step-headline';
+  headline.textContent = 'Recovery Phrase';
+  div.appendChild(headline);
+
+  const subtitle = document.createElement('p');
+  subtitle.className = 'step-subtitle';
+  subtitle.textContent = 'Your identity keys are derived from a BIP39 mnemonic phrase.';
+  div.appendChild(subtitle);
+
+  // Choice buttons
+  const choiceButtons = document.createElement('div');
+  choiceButtons.className = 'mode-buttons';
+  choiceButtons.id = 'mnemonic-choice-buttons';
+  choiceButtons.innerHTML = `
+    <button id="mnemonic-generate-btn" class="mode-btn primary-btn">
+      <span class="mode-label">Generate New Phrase</span>
+      <span class="mode-desc">Create a new 12-word recovery phrase</span>
+    </button>
+    <button id="mnemonic-import-btn" class="mode-btn secondary-btn">
+      <span class="mode-label">Import Existing Phrase</span>
+      <span class="mode-desc">Use a mnemonic you already have</span>
+    </button>
+  `;
+  div.appendChild(choiceButtons);
+
+  // Import section (hidden initially)
+  const importSection = document.createElement('div');
+  importSection.id = 'mnemonic-import-section';
+  importSection.className = 'mnemonic-import-section hidden';
+
+  const inputGroup = document.createElement('div');
+  inputGroup.className = 'input-group';
+  inputGroup.innerHTML = `
+    <label class="input-label">Enter your mnemonic phrase</label>
+    <textarea
+      id="mnemonic-import-textarea"
+      class="mnemonic-import-textarea"
+      rows="3"
+      placeholder="word1 word2 word3 ... (12 or 24 words separated by spaces)"
+    ></textarea>
+    <p class="input-hint">Enter your BIP39 mnemonic words separated by spaces</p>
+  `;
+  importSection.appendChild(inputGroup);
+
+  // Validation error
+  if (state.mnemonicValidationError) {
+    const errorMsg = document.createElement('p');
+    errorMsg.className = 'validation-msg';
+    errorMsg.textContent = state.mnemonicValidationError;
+    importSection.appendChild(errorMsg);
+  }
+
+  const importContinueBtn = document.createElement('button');
+  importContinueBtn.id = 'mnemonic-import-continue-btn';
+  importContinueBtn.className = 'primary-btn';
+  importContinueBtn.textContent = 'Continue';
+  importSection.appendChild(importContinueBtn);
+
+  div.appendChild(importSection);
+
+  // Back button
+  const navButtons = document.createElement('div');
+  navButtons.className = 'nav-buttons';
+
+  const backBtn = document.createElement('button');
+  backBtn.id = 'back-btn';
+  backBtn.className = 'secondary-btn';
+  backBtn.textContent = 'Back';
+  navButtons.appendChild(backBtn);
+
+  div.appendChild(navButtons);
 
   return div;
 }
@@ -485,12 +569,17 @@ function renderDepositStep(state: BridgeState): HTMLElement {
     mnemonicHeader.innerHTML = '<strong>Recovery Phrase</strong>';
     mnemonicSection.appendChild(mnemonicHeader);
 
+    const words = state.mnemonic.split(' ');
+    const wordCount = words.length;
+
     const mnemonicWarning = document.createElement('p');
     mnemonicWarning.className = 'mnemonic-warning';
-    mnemonicWarning.textContent = 'Write down these 12 words in order. This is the only way to recover your keys.';
+    if (state.mnemonicImported) {
+      mnemonicWarning.textContent = `Your ${wordCount}-word recovery phrase. Verify it matches what you entered.`;
+    } else {
+      mnemonicWarning.textContent = `Write down these ${wordCount} words in order. This is the only way to recover your keys.`;
+    }
     mnemonicSection.appendChild(mnemonicWarning);
-
-    const words = state.mnemonic.split(' ');
     const mnemonicWords = document.createElement('div');
     mnemonicWords.className = 'mnemonic-words';
     mnemonicWords.innerHTML = words.map((word, i) =>
