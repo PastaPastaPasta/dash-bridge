@@ -1109,7 +1109,11 @@ async function startTopUp() {
       await delay(120);
       updateState(setTransactionBroadcast(state, 'b'.repeat(64)));
       await delay(120);
-      updateState(setInstantLockReceived(state, new Uint8Array([1, 2, 3, 4]), 'c0ffee'));
+      updateState(setInstantLockReceived(state, new Uint8Array([1, 2, 3, 4]), {
+        transactionBytes: new Uint8Array([0xc0, 0xff, 0xee]),
+        instantLockBytes: new Uint8Array([1, 2, 3, 4]),
+        outputIndex: 0,
+      }));
       updateState(setStep(state, 'topping_up'));
       await delay(120);
       updateState(setTopUpComplete(state));
@@ -1244,7 +1248,11 @@ async function startBridge() {
       await delay(120);
       updateState(setTransactionBroadcast(state, 'd'.repeat(64)));
       await delay(120);
-      updateState(setInstantLockReceived(state, new Uint8Array([5, 6, 7, 8]), 'beef'));
+      updateState(setInstantLockReceived(state, new Uint8Array([5, 6, 7, 8]), {
+        transactionBytes: new Uint8Array([0xbe, 0xef]),
+        instantLockBytes: new Uint8Array([5, 6, 7, 8]),
+        outputIndex: 0,
+      }));
       await delay(120);
       updateState(setIdentityRegistered(state, E2E_MOCK_IDENTITY_ID));
       return;
