@@ -1416,8 +1416,8 @@ async function recheckDeposit() {
         state.network
       );
       updateState(setSendToAddressComplete(state));
-    } else {
-      // Default: create mode — register identity
+    } else if (state.mode === 'create') {
+      // Create mode — register identity
       updateState(setStep(state, 'registering_identity'));
       const result = await registerIdentity(
         assetLockProof,
@@ -1428,6 +1428,8 @@ async function recheckDeposit() {
       updateState(setIdentityRegistered(state, result.identityId));
       // Auto-download final key backup on "Save your keys" page
       downloadKeyBackup(state);
+    } else {
+      throw new Error(`recheckDeposit: unexpected mode '${state.mode}'`);
     }
 
   } catch (error) {
