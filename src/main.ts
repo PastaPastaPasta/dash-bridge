@@ -1,4 +1,4 @@
-import { getNetwork } from './config.js';
+import { getNetwork, MAINNET, TESTNET } from './config.js';
 import { publicKeyToAddress, signTransaction, generateKeyPair } from './crypto/index.js';
 import { deriveAssetLockKeyPair } from './crypto/hd.js';
 import { createAssetLockTransaction, serializeTransaction } from './transaction/index.js';
@@ -105,14 +105,31 @@ let dapiClient: DAPIClient;
  * Initialize the application
  */
 function init() {
-  // Get network from URL or default to testnet
   const urlParams = new URLSearchParams(window.location.search);
-  const network = urlParams.get('network') === 'mainnet' ? 'mainnet' : 'testnet';
+
+  // Infer network from ?address= param prefix, falling back to ?network= param
+  let network: 'testnet' | 'mainnet' = urlParams.get('network') === 'mainnet' ? 'mainnet' : 'testnet';
+  const addressParam = urlParams.get('address')?.trim();
+  if (addressParam) {
+    try {
+      const decoded = bech32m.decode(addressParam as `${string}1${string}`);
+      if (decoded.prefix === MAINNET.platformHrp) network = 'mainnet';
+      else if (decoded.prefix === TESTNET.platformHrp) network = 'testnet';
+    } catch {
+      // Invalid address — will be ignored below
+    }
+  }
 
   // Initialize state
   state = createInitialState(network);
   insightClient = new InsightClient(getNetwork(network));
   dapiClient = new DAPIClient({ network });
+
+  // Deep-link: ?address=<bech32m> opens send-to-address mode with address pre-filled
+  if (addressParam && validatePlatformAddress(addressParam, network)) {
+    state = setMode(state, 'send_to_address');
+    state = setRecipientPlatformAddress(state, addressParam);
+  }
 
   // Render UI
   const container = document.getElementById('app');
