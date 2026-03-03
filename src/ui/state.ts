@@ -56,15 +56,17 @@ export function setKeyPairs(
  * Set bridge mode and transition to appropriate initial step
  */
 export function setMode(state: BridgeState, mode: BridgeMode): BridgeState {
+  const clearedState = clearModeSensitiveFields(state, mode);
+
   if (mode === 'create') {
     // Create mode: generate mnemonic and identity keys
     const mnemonic = generateNewMnemonic(128);
     return {
-      ...state,
+      ...clearedState,
       step: 'configure_keys',
       mode,
       mnemonic,
-      identityKeys: generateDefaultIdentityKeysHD(state.network, mnemonic),
+      identityKeys: generateDefaultIdentityKeysHD(clearedState.network, mnemonic),
       // Clear any top-up state
       targetIdentityId: undefined,
       isOneTimeKey: undefined,
@@ -72,17 +74,28 @@ export function setMode(state: BridgeState, mode: BridgeMode): BridgeState {
   } else if (mode === 'topup') {
     // Top-up mode: no mnemonic, no identity keys
     return {
-      ...state,
+      ...clearedState,
       step: 'enter_identity',
       mode,
       mnemonic: undefined,
       identityKeys: [],
       isOneTimeKey: true,
     };
+  } else if (mode === 'send_to_address') {
+    // Send to platform address mode: user enters recipient bech32m address
+    return {
+      ...clearedState,
+      step: 'enter_recipient_address',
+      mode,
+      mnemonic: undefined,
+      identityKeys: [],
+      isOneTimeKey: true,
+      recipientPlatformAddress: undefined,
+    };
   } else if (mode === 'dpns') {
     // DPNS mode: go to identity source selection
     return {
-      ...state,
+      ...clearedState,
       step: 'dpns_choose_identity',
       mode,
       dpnsUsernames: [],
@@ -93,7 +106,7 @@ export function setMode(state: BridgeState, mode: BridgeMode): BridgeState {
   } else {
     // Manage mode: go to identity entry
     return {
-      ...state,
+      ...clearedState,
       step: 'manage_enter_identity',
       mode,
       // Clear any previous manage state
@@ -108,6 +121,13 @@ export function setMode(state: BridgeState, mode: BridgeMode): BridgeState {
       manageKeyValidationError: undefined,
     };
   }
+}
+
+function clearModeSensitiveFields(state: BridgeState, mode: BridgeMode): BridgeState {
+  return {
+    ...state,
+    recipientPlatformAddress: mode === 'send_to_address' ? state.recipientPlatformAddress : undefined,
+  };
 }
 
 /**
@@ -145,6 +165,29 @@ export function setTopUpComplete(state: BridgeState): BridgeState {
     ...state,
     step: 'complete',
     identityId: state.targetIdentityId, // Use target identity ID on completion
+  };
+}
+
+/**
+ * Set recipient platform address for send_to_address mode
+ */
+export function setRecipientPlatformAddress(
+  state: BridgeState,
+  recipientPlatformAddress: string
+): BridgeState {
+  return {
+    ...state,
+    recipientPlatformAddress,
+  };
+}
+
+/**
+ * Set send to address complete
+ */
+export function setSendToAddressComplete(state: BridgeState): BridgeState {
+  return {
+    ...state,
+    step: 'complete',
   };
 }
 
@@ -396,6 +439,8 @@ export function getStepDescription(step: BridgeStep): string {
     waiting_islock: 'Confirming...',
     registering_identity: 'Creating identity...',
     topping_up: 'Adding credits...',
+    enter_recipient_address: 'Send to platform address',
+    sending_to_address: 'Sending to address...',
     complete: 'Complete',
     error: 'Something went wrong',
     // DPNS steps
@@ -432,6 +477,8 @@ export function getStepProgress(step: BridgeStep): number {
     waiting_islock: 80,
     registering_identity: 90,
     topping_up: 90,
+    enter_recipient_address: 10,
+    sending_to_address: 90,
     complete: 100,
     error: 0,
     // DPNS steps
@@ -464,6 +511,7 @@ export function isProcessingStep(step: BridgeStep): boolean {
     'waiting_islock',
     'registering_identity',
     'topping_up',
+    'sending_to_address',
     // DPNS processing steps
     'dpns_checking',
     'dpns_registering',

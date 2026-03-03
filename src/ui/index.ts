@@ -6,6 +6,8 @@ export {
   setTargetIdentityId,
   setOneTimeKeyPair,
   setTopUpComplete,
+  setRecipientPlatformAddress,
+  setSendToAddressComplete,
   setUtxoDetected,
   setTransactionSigned,
   setTransactionBroadcast,
