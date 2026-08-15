@@ -56,11 +56,13 @@ export function formatCredits(credits: bigint): string {
 }
 
 /**
- * Credits held back from the spendable balance so the withdrawal transition's
- * own Platform processing fee (paid from the remaining identity balance) can
- * still be covered. Heuristic headroom, not a consensus value.
+ * Platform's minimum-fee gate for credit withdrawals: the network rejects a
+ * withdrawal unless balance >= amount + this value (protocol constant
+ * `state_transition_min_fees.credit_withdrawal`, 400M credits — "credit
+ * withdrawals are more expensive than the rest"). There is no "withdraw all"
+ * sentinel in the protocol, so the exact maximum is balance minus this gate.
  */
-export const WITHDRAWAL_FEE_RESERVE_CREDITS = 50_000_000n; // 0.0005 DASH
+export const WITHDRAWAL_FEE_RESERVE_CREDITS = 400_000_000n; // 0.004 DASH
 
 /**
  * The most that can be withdrawn from a balance: the per-transition consensus

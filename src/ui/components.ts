@@ -2304,6 +2304,7 @@ const WITHDRAW_STATUS_LABELS: { status: number; label: string }[] = [
 function renderWithdrawEnterIdentityStep(state: BridgeState): HTMLElement {
   const div = document.createElement('div');
   div.className = 'withdraw-enter-identity-step';
+  div.id = 'withdraw-key-upload-dropzone';
 
   const headline = document.createElement('h2');
   headline.className = 'manage-headline';
@@ -2329,6 +2330,8 @@ function renderWithdrawEnterIdentityStep(state: BridgeState): HTMLElement {
   }
 
   form.innerHTML = `
+    ${renderKeyUploadSection('withdraw-key-upload')}
+
     <div class="input-group">
       <label class="input-label" for="withdraw-identity-id-input">Identity ID</label>
       <input

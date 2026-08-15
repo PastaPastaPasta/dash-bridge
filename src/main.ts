@@ -1463,6 +1463,7 @@ function setupEventListeners(container: HTMLElement) {
   function wireKeyUpload(
     inputId: string,
     onParsed: (result: { identityId: string; privateKeyWif: string }) => void,
+    preferredPurpose?: string,
   ) {
     const fileInput = container.querySelector<HTMLInputElement>(`#${inputId}`);
     const dropzone = container.querySelector<HTMLElement>(`#${inputId}-dropzone`);
@@ -1474,7 +1475,7 @@ function setupEventListeners(container: HTMLElement) {
       reader.onload = () => {
         try {
           const json = JSON.parse(reader.result as string);
-          const parsed = parseKeyBackup(json);
+          const parsed = parseKeyBackup(json, preferredPurpose);
           if (!parsed) {
             if (statusEl) { statusEl.textContent = 'No identity or keys found in file'; statusEl.className = 'key-upload-status error'; }
             return;
@@ -1575,6 +1576,36 @@ function setupEventListeners(container: HTMLElement) {
   // ============================================================================
   // Withdraw Event Listeners
   // ============================================================================
+
+  // Withdraw key upload — prefer the TRANSFER key from the backup, fetch
+  // identity + balance, validate, and land on the configure step in one shot
+  wireKeyUpload('withdraw-key-upload', async (result) => {
+    updateState(setWithdrawIdentityFetching(state, result.identityId));
+    try {
+      const [keys, identityState] = await Promise.all([
+        getIdentityPublicKeys(result.identityId, state.network),
+        getIdentityBalanceAndRevision(result.identityId, state.network),
+      ]);
+      let finalState = setWithdrawIdentityFetched(state, keys, BigInt(identityState.balance));
+      const match = findMatchingKeyIndex(result.privateKeyWif, keys, state.network);
+      if (match && match.purpose === 3 /* TRANSFER */) {
+        finalState = setWithdrawKeyValidated(finalState, match.keyId, match.purpose, match.securityLevel, result.privateKeyWif);
+      } else if (match) {
+        finalState = {
+          ...finalState,
+          withdrawKeyValidationError: `The backup's ${getPurposeName(match.purpose)} key cannot sign withdrawals — a TRANSFER key is required.`,
+        };
+      } else {
+        finalState = {
+          ...finalState,
+          withdrawKeyValidationError: 'No key in the backup matches this identity',
+        };
+      }
+      updateState(finalState);
+    } catch (error) {
+      updateState(setWithdrawIdentityFetchError(state, error instanceof Error ? error.message : String(error)));
+    }
+  }, 'TRANSFER');
 
   // Withdraw mode button (init page)
   const modeWithdrawBtn = container.querySelector('#mode-withdraw-btn');
@@ -2002,7 +2033,7 @@ function validateIdentityId(id?: string): boolean {
  * are required for DPNS and contract operations. MASTER keys are ranked lower
  * because they are rejected by isPurposeAllowedForDpns/isSecurityLevelAllowedForDpns.
  */
-function parseKeyBackup(json: unknown): { identityId: string; privateKeyWif: string; purpose: string; securityLevel: string } | null {
+function parseKeyBackup(json: unknown, preferredPurpose?: string): { identityId: string; privateKeyWif: string; purpose: string; securityLevel: string } | null {
   if (!json || typeof json !== 'object') return null;
   const obj = json as Record<string, unknown>;
   const identityId = (obj.identityId || obj.targetIdentityId) as string | undefined;
@@ -2014,6 +2045,12 @@ function parseKeyBackup(json: unknown): { identityId: string; privateKeyWif: str
   const ranked = keys
     .filter((k) => typeof k.privateKeyWif === 'string')
     .sort((a, b) => {
+      // Caller-preferred purpose wins outright (e.g. TRANSFER for withdrawals)
+      if (preferredPurpose) {
+        const aPref = a.purpose === preferredPurpose ? 1 : 0;
+        const bPref = b.purpose === preferredPurpose ? 1 : 0;
+        if (aPref !== bPref) return bPref - aPref;
+      }
       // Prefer AUTHENTICATION purpose
       const aAuth = a.purpose === 'AUTHENTICATION' ? 1 : 0;
       const bAuth = b.purpose === 'AUTHENTICATION' ? 1 : 0;
