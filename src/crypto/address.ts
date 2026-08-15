@@ -1,7 +1,54 @@
 import { hash160 } from './hash.js';
-import { base58CheckEncode } from '../utils/base58.js';
+import { base58CheckEncode, base58CheckDecode } from '../utils/base58.js';
 import { concatBytes } from '../utils/hex.js';
 import type { NetworkConfig } from '../config.js';
+
+export interface CoreAddressValidation {
+  valid: boolean;
+  type?: 'p2pkh' | 'p2sh';
+  error?: string;
+}
+
+/**
+ * Validate a Dash Core (L1) base58check address for the given network.
+ * Accepts P2PKH and P2SH addresses only — the two script types Platform
+ * allows as credit-withdrawal destinations.
+ */
+export function validateCoreAddress(
+  address: string,
+  network: NetworkConfig
+): CoreAddressValidation {
+  const trimmed = address.trim();
+  if (trimmed.length === 0) {
+    return { valid: false, error: 'Enter a Dash address' };
+  }
+  if (trimmed.toLowerCase().startsWith('dash1') || trimmed.toLowerCase().startsWith('tdash1')) {
+    return {
+      valid: false,
+      error: 'This looks like a Platform address. Enter a Dash Core address (starts with X on mainnet, y on testnet).',
+    };
+  }
+  let payload: Uint8Array;
+  try {
+    payload = base58CheckDecode(trimmed);
+  } catch {
+    return { valid: false, error: 'Invalid address (bad characters or checksum)' };
+  }
+  if (payload.length !== 21) {
+    return { valid: false, error: 'Invalid address (unexpected length)' };
+  }
+  const version = payload[0];
+  if (version === network.addressPrefix) {
+    return { valid: true, type: 'p2pkh' };
+  }
+  if (version === network.p2shPrefix) {
+    return { valid: true, type: 'p2sh' };
+  }
+  return {
+    valid: false,
+    error: `This address is not valid for ${network.name} (wrong network prefix)`,
+  };
+}
 
 /**
  * Generate P2PKH address from public key

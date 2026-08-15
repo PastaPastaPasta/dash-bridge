@@ -3,6 +3,8 @@ import {
   E2E_MOCK_DPNS_WIF,
   E2E_MOCK_IDENTITY_ID,
   E2E_MOCK_MANAGE_WIF,
+  E2E_MOCK_WITHDRAW_WIF,
+  E2E_MOCK_WITHDRAW_ADDRESS,
 } from '../src/e2e-mock-constants';
 
 const MOCK_QUERY = '/?network=testnet&e2e=mock';
@@ -90,6 +92,64 @@ test.describe('Deterministic UI E2E (mock mode)', () => {
 
     await page.click('#apply-manage-btn');
     await expect(page.getByText('Update Complete!')).toBeVisible();
+  });
+
+  test('withdraw flow validates inputs and completes with status tracking', async ({ page }) => {
+    await page.goto(MOCK_QUERY);
+
+    await page.click('#mode-withdraw-btn');
+    await expect(page.locator('#withdraw-identity-id-input')).toBeVisible();
+
+    // Invalid identity ID is rejected
+    await page.fill('#withdraw-identity-id-input', 'nope');
+    await page.locator('#withdraw-identity-id-input').press('Tab');
+    await expect(page.getByText('Invalid identity ID format')).toBeVisible();
+
+    // Valid identity advances to configure with the balance shown
+    await page.fill('#withdraw-identity-id-input', E2E_MOCK_IDENTITY_ID);
+    await page.locator('#withdraw-identity-id-input').press('Tab');
+    await expect(page.getByText('Configure Withdrawal')).toBeVisible();
+    await expect(page.locator('.withdraw-balance')).toContainText('0.25 DASH');
+
+    // Wrong WIF is rejected, the mock WIF validates as a TRANSFER key
+    await page.fill('#withdraw-private-key-input', 'bad-key');
+    await page.locator('#withdraw-private-key-input').press('Tab');
+    await expect(page.getByText('Mock mode: use the configured test private key')).toBeVisible();
+
+    await page.fill('#withdraw-private-key-input', E2E_MOCK_WITHDRAW_WIF);
+    await page.locator('#withdraw-private-key-input').press('Tab');
+    await expect(page.getByText('Key matches key #3 (TRANSFER / CRITICAL)')).toBeVisible();
+
+    // Bad address is rejected (real validation runs even in mock mode)
+    await page.fill('#withdraw-address-input', 'not-an-address');
+    await page.locator('#withdraw-address-input').press('Tab');
+    await expect(page.locator('#withdraw-address-error')).toBeVisible();
+
+    await page.fill('#withdraw-address-input', E2E_MOCK_WITHDRAW_ADDRESS);
+    await page.locator('#withdraw-address-input').press('Tab');
+    await expect(page.locator('#withdraw-address-error')).toHaveCount(0);
+
+    // Amount below the minimum, above the balance, then valid
+    await page.fill('#withdraw-amount-input', '0.000001');
+    await page.locator('#withdraw-amount-input').press('Tab');
+    await expect(page.locator('#withdraw-amount-error')).toContainText('Minimum withdrawal');
+
+    await page.fill('#withdraw-amount-input', '1');
+    await page.locator('#withdraw-amount-input').press('Tab');
+    await expect(page.locator('#withdraw-amount-error')).toContainText('exceeds your balance');
+    await expect(page.locator('#withdraw-submit-btn')).toBeDisabled();
+
+    await page.fill('#withdraw-amount-input', '0.1');
+    await page.locator('#withdraw-amount-input').press('Tab');
+    await expect(page.locator('#withdraw-amount-credits')).toContainText('10,000,000,000 credits');
+    await expect(page.locator('#withdraw-submit-btn')).toBeEnabled();
+
+    // Submit walks the mock status sequence to completion
+    await page.click('#withdraw-submit-btn');
+    await expect(page.getByText('Withdrawal Complete!')).toBeVisible();
+    await expect(page.getByText('0.1 DASH')).toBeVisible();
+    await expect(page.getByText(E2E_MOCK_WITHDRAW_ADDRESS)).toBeVisible();
+    await expect(page.getByText('0.15 DASH')).toBeVisible(); // remaining balance
   });
 
   test('standalone DPNS flow validates identity + key and completes registration', async ({ page }) => {

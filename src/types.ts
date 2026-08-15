@@ -68,7 +68,7 @@ export interface IdentityKeyConfig {
 /**
  * Bridge operation mode
  */
-export type BridgeMode = 'create' | 'topup' | 'send_to_address' | 'dpns' | 'manage' | 'contract';
+export type BridgeMode = 'create' | 'topup' | 'send_to_address' | 'dpns' | 'manage' | 'contract' | 'withdraw';
 
 /**
  * DPNS identity source for standalone mode
@@ -184,7 +184,13 @@ export type BridgeStep =
   | 'contract_enter_contract'   // Paste contract JSON, see fee estimate
   | 'contract_review'           // Review contract + fees before publishing
   | 'contract_registering'      // Publishing contract on platform
-  | 'contract_complete';        // Contract registered
+  | 'contract_complete'         // Contract registered
+  // Withdraw (asset unlock) steps
+  | 'withdraw_enter_identity'   // Enter identity ID, fetch keys + balance
+  | 'withdraw_configure'        // Enter TRANSFER key WIF, destination address, amount
+  | 'withdraw_submitting'       // Credit withdrawal transition in flight
+  | 'withdraw_tracking'         // Polling withdrawal document status
+  | 'withdraw_complete';        // Withdrawal done (or failed)
 
 /**
  * Status of network retry attempts
@@ -385,6 +391,38 @@ export interface BridgeState {
   contractIdentityBalance?: number;
   /** Minimum deposit amount in satoshis (overrides default 300,000 for contract mode) */
   minimumDeposit?: number;
+
+  // Withdraw (asset unlock) fields
+  /** Withdraw: whether identity is being fetched */
+  withdrawIdentityFetching?: boolean;
+  /** Withdraw: identity fetch error */
+  withdrawIdentityFetchError?: string;
+  /** Withdraw: fetched identity keys */
+  withdrawIdentityKeys?: IdentityPublicKeyInfo[];
+  /** Withdraw: identity credit balance in credits */
+  withdrawBalance?: bigint;
+  /** Withdraw: private key WIF for signing (must match a TRANSFER key) */
+  withdrawPrivateKeyWif?: string;
+  /** Withdraw: validated signing key info */
+  withdrawSigningKeyInfo?: { keyId: number; purpose: number; securityLevel: number };
+  /** Withdraw: key validation error message */
+  withdrawKeyValidationError?: string;
+  /** Withdraw: destination Dash Core address as typed (valid when withdrawAddressError is unset) */
+  withdrawToAddress?: string;
+  /** Withdraw: destination address validation error */
+  withdrawAddressError?: string;
+  /** Withdraw: validated amount to withdraw, in credits */
+  withdrawAmountCredits?: bigint;
+  /** Withdraw: raw DASH amount input (preserved across re-renders) */
+  withdrawAmountInput?: string;
+  /** Withdraw: amount validation error */
+  withdrawAmountError?: string;
+  /** Withdraw: submission result */
+  withdrawResult?: { success: boolean; remainingBalance?: bigint; error?: string };
+  /** Withdraw: latest withdrawal document status (0 QUEUED, 1 POOLED, 2 BROADCASTED, 3 COMPLETE, 4 EXPIRED) */
+  withdrawStatus?: number;
+  /** Withdraw: status polling problem / timeout explanation (informational, not a failure) */
+  withdrawStatusError?: string;
 
   // Faucet request state
   /** Current status of faucet request */

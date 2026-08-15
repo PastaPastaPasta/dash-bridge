@@ -19,6 +19,7 @@ import {
 } from '../crypto/keys.js';
 import { generateNewMnemonic } from '../crypto/hd.js';
 import { createEmptyUsernameEntry, createUsernameEntry } from '../platform/dpns-utils.js';
+import { WithdrawalStatus } from '../platform/withdrawal-status.js';
 
 /**
  * Error codes for user-facing display.
@@ -41,6 +42,7 @@ export const ErrorCodes = {
   CONFIG:           'ERR-1012',
   CONTRACT_REGISTER: 'ERR-1013',
   CHAINLOCK:        'ERR-1014',
+  WITHDRAW:         'ERR-1015',
 } as const;
 
 /** Human-readable labels for error codes */
@@ -60,6 +62,7 @@ export const ErrorCodeLabels: Record<string, string> = {
   [ErrorCodes.CONFIG]:          'Configuration error',
   [ErrorCodes.CONTRACT_REGISTER]: 'Contract registration failed',
   [ErrorCodes.CHAINLOCK]:        'Chain lock fallback failed',
+  [ErrorCodes.WITHDRAW]:         'Credit withdrawal failed',
 };
 
 /** Map a processing step to its error code */
@@ -77,6 +80,8 @@ const StepErrorCodes: Partial<Record<BridgeStep, string>> = {
   dpns_registering:     ErrorCodes.DPNS_REGISTER,
   manage_updating:      ErrorCodes.IDENTITY_UPDATE,
   contract_registering: ErrorCodes.CONTRACT_REGISTER,
+  withdraw_submitting:  ErrorCodes.WITHDRAW,
+  withdraw_tracking:    ErrorCodes.WITHDRAW,
 };
 
 /** Coerce an unknown caught value into an Error */
@@ -195,6 +200,31 @@ export function setMode(state: BridgeState, mode: BridgeMode): BridgeState {
       contractIdentityBalance: undefined,
       minimumDeposit: undefined,
     };
+  } else if (mode === 'withdraw') {
+    // Withdraw mode: go to identity entry, clear any previous withdraw state
+    return {
+      ...clearedState,
+      step: 'withdraw_enter_identity',
+      mode,
+      mnemonic: undefined,
+      identityKeys: [],
+      targetIdentityId: undefined,
+      withdrawIdentityFetching: undefined,
+      withdrawIdentityFetchError: undefined,
+      withdrawIdentityKeys: undefined,
+      withdrawBalance: undefined,
+      withdrawPrivateKeyWif: undefined,
+      withdrawSigningKeyInfo: undefined,
+      withdrawKeyValidationError: undefined,
+      withdrawToAddress: undefined,
+      withdrawAddressError: undefined,
+      withdrawAmountCredits: undefined,
+      withdrawAmountInput: undefined,
+      withdrawAmountError: undefined,
+      withdrawResult: undefined,
+      withdrawStatus: undefined,
+      withdrawStatusError: undefined,
+    };
   } else {
     // Manage mode: go to identity entry
     return {
@@ -216,9 +246,15 @@ export function setMode(state: BridgeState, mode: BridgeMode): BridgeState {
 }
 
 function clearModeSensitiveFields(state: BridgeState, mode: BridgeMode): BridgeState {
+  // setMode('withdraw') re-clears the withdraw block itself, so these can be
+  // dropped unconditionally here.
   return {
     ...state,
     recipientPlatformAddress: mode === 'send_to_address' ? state.recipientPlatformAddress : undefined,
+    withdrawPrivateKeyWif: undefined,
+    withdrawSigningKeyInfo: undefined,
+    withdrawToAddress: undefined,
+    withdrawAmountCredits: undefined,
   };
 }
 
@@ -643,6 +679,12 @@ export function getStepDescription(step: BridgeStep): string {
     contract_review: 'Review contract',
     contract_registering: 'Publishing contract...',
     contract_complete: 'Contract registered',
+    // Withdraw steps
+    withdraw_enter_identity: 'Withdraw credits',
+    withdraw_configure: 'Configure withdrawal',
+    withdraw_submitting: 'Submitting withdrawal...',
+    withdraw_tracking: 'Processing withdrawal...',
+    withdraw_complete: 'Withdrawal complete',
   };
   return descriptions[step];
 }
@@ -689,6 +731,12 @@ export function getStepProgress(step: BridgeStep): number {
     contract_review: 60,
     contract_registering: 80,
     contract_complete: 100,
+    // Withdraw steps
+    withdraw_enter_identity: 20,
+    withdraw_configure: 40,
+    withdraw_submitting: 70,
+    withdraw_tracking: 85,
+    withdraw_complete: 100,
   };
   return progress[step];
 }
@@ -715,6 +763,9 @@ export function isProcessingStep(step: BridgeStep): boolean {
     'manage_updating',
     // Contract registration processing steps
     'contract_registering',
+    // Withdraw processing steps
+    'withdraw_submitting',
+    'withdraw_tracking',
   ];
   return processingSteps.includes(step);
 }
@@ -1475,5 +1526,239 @@ export function resetFaucetState(state: BridgeState): BridgeState {
     faucetRequestStatus: 'idle',
     faucetTxid: undefined,
     faucetError: undefined,
+  };
+}
+
+// ============================================================================
+// Withdraw (Asset Unlock) State Functions
+// ============================================================================
+
+/**
+ * Start fetching identity keys + balance for withdrawal
+ */
+export function setWithdrawIdentityFetching(state: BridgeState, identityId: string): BridgeState {
+  return {
+    ...state,
+    targetIdentityId: identityId,
+    withdrawIdentityFetching: true,
+    withdrawIdentityFetchError: undefined,
+    withdrawIdentityKeys: undefined,
+    withdrawBalance: undefined,
+    withdrawSigningKeyInfo: undefined,
+    withdrawKeyValidationError: undefined,
+  };
+}
+
+/**
+ * Identity fetch succeeded — advance to configure step with keys + balance
+ */
+export function setWithdrawIdentityFetched(
+  state: BridgeState,
+  keys: IdentityPublicKeyInfo[],
+  balanceCredits: bigint
+): BridgeState {
+  return {
+    ...state,
+    step: 'withdraw_configure',
+    withdrawIdentityFetching: false,
+    withdrawIdentityFetchError: undefined,
+    withdrawIdentityKeys: keys,
+    withdrawBalance: balanceCredits,
+  };
+}
+
+/**
+ * Identity fetch failed
+ */
+export function setWithdrawIdentityFetchError(state: BridgeState, error: string): BridgeState {
+  return {
+    ...state,
+    withdrawIdentityFetching: false,
+    withdrawIdentityFetchError: error,
+    withdrawIdentityKeys: undefined,
+    withdrawBalance: undefined,
+  };
+}
+
+/**
+ * Signing key validated (matched a TRANSFER key on the identity)
+ */
+export function setWithdrawKeyValidated(
+  state: BridgeState,
+  keyId: number,
+  purpose: number,
+  securityLevel: number,
+  privateKeyWif: string
+): BridgeState {
+  return {
+    ...state,
+    withdrawPrivateKeyWif: privateKeyWif,
+    withdrawSigningKeyInfo: { keyId, purpose, securityLevel },
+    withdrawKeyValidationError: undefined,
+  };
+}
+
+/**
+ * Key validation failed
+ */
+export function setWithdrawKeyValidationError(state: BridgeState, error: string): BridgeState {
+  return {
+    ...state,
+    withdrawSigningKeyInfo: undefined,
+    withdrawPrivateKeyWif: undefined,
+    withdrawKeyValidationError: error,
+  };
+}
+
+/**
+ * Clear key validation (when private key input changes)
+ */
+export function clearWithdrawKeyValidation(state: BridgeState): BridgeState {
+  return {
+    ...state,
+    withdrawSigningKeyInfo: undefined,
+    withdrawPrivateKeyWif: undefined,
+    withdrawKeyValidationError: undefined,
+  };
+}
+
+/**
+ * Set the destination address input; pass `error` when it failed validation.
+ * The raw input is kept either way so the user can correct typos in place.
+ */
+export function setWithdrawAddress(state: BridgeState, input: string, error?: string): BridgeState {
+  return {
+    ...state,
+    withdrawToAddress: input || undefined,
+    withdrawAddressError: error,
+  };
+}
+
+/**
+ * Set validated withdrawal amount (in credits)
+ */
+export function setWithdrawAmount(state: BridgeState, credits: bigint, input: string): BridgeState {
+  return {
+    ...state,
+    withdrawAmountCredits: credits,
+    withdrawAmountInput: input,
+    withdrawAmountError: undefined,
+  };
+}
+
+/**
+ * Amount validation failed (keeps the raw input for correction)
+ */
+export function setWithdrawAmountError(state: BridgeState, input: string, error: string): BridgeState {
+  return {
+    ...state,
+    withdrawAmountCredits: undefined,
+    withdrawAmountInput: input,
+    withdrawAmountError: error,
+  };
+}
+
+/**
+ * Start submitting the withdrawal transition
+ */
+export function setWithdrawSubmitting(state: BridgeState): BridgeState {
+  return {
+    ...state,
+    step: 'withdraw_submitting',
+    withdrawResult: undefined,
+    withdrawStatus: undefined,
+    withdrawStatusError: undefined,
+  };
+}
+
+/**
+ * Withdrawal transition accepted (or its outcome is unknown after a submission
+ * timeout) — start tracking payout status. `remainingBalance` is undefined in
+ * the timed-out case, where the post-withdrawal balance was never observed.
+ */
+export function setWithdrawSubmitted(state: BridgeState, remainingBalance?: bigint): BridgeState {
+  return {
+    ...state,
+    step: 'withdraw_tracking',
+    withdrawResult: { success: true, remainingBalance },
+    withdrawStatus: WithdrawalStatus.QUEUED,
+  };
+}
+
+/**
+ * Withdrawal transition failed
+ */
+export function setWithdrawSubmitError(state: BridgeState, error: string): BridgeState {
+  return {
+    ...state,
+    step: 'withdraw_complete',
+    withdrawResult: { success: false, error },
+  };
+}
+
+/**
+ * Update tracked withdrawal status; terminal statuses finish the flow.
+ * A successful status read also clears any transient polling warning.
+ */
+export function setWithdrawStatusUpdate(state: BridgeState, status: number): BridgeState {
+  const isTerminal = status === WithdrawalStatus.COMPLETE || status === WithdrawalStatus.EXPIRED;
+  return {
+    ...state,
+    step: isTerminal ? 'withdraw_complete' : state.step,
+    withdrawStatus: status,
+    withdrawStatusError: undefined,
+  };
+}
+
+/**
+ * Set or clear the transient status-polling note shown on the tracking step
+ */
+export function setWithdrawStatusNote(state: BridgeState, note?: string): BridgeState {
+  return {
+    ...state,
+    withdrawStatusError: note,
+  };
+}
+
+/**
+ * Stop tracking without a terminal status (timeout or user chose to leave).
+ * The withdrawal itself succeeded — this only annotates why tracking stopped.
+ */
+export function setWithdrawTrackingTimeout(state: BridgeState, explanation: string): BridgeState {
+  return {
+    ...state,
+    step: 'withdraw_complete',
+    withdrawStatusError: explanation,
+  };
+}
+
+/**
+ * Go back to withdraw identity entry, clearing key material
+ */
+export function setWithdrawBackToEntry(state: BridgeState): BridgeState {
+  return {
+    ...state,
+    step: 'withdraw_enter_identity',
+    withdrawSigningKeyInfo: undefined,
+    withdrawPrivateKeyWif: undefined,
+    withdrawKeyValidationError: undefined,
+    withdrawAmountCredits: undefined,
+    withdrawAmountInput: undefined,
+    withdrawAmountError: undefined,
+    withdrawToAddress: undefined,
+    withdrawAddressError: undefined,
+  };
+}
+
+/**
+ * Return to configure step to retry a failed withdrawal
+ */
+export function setWithdrawRetry(state: BridgeState): BridgeState {
+  return {
+    ...state,
+    step: 'withdraw_configure',
+    withdrawResult: undefined,
+    withdrawStatus: undefined,
+    withdrawStatusError: undefined,
   };
 }

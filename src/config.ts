@@ -3,6 +3,8 @@ export interface NetworkConfig {
   name: string;
   insightApiUrl: string;
   addressPrefix: number;
+  /** Base58 version byte for P2SH addresses (dashcore SCRIPT_ADDRESS: 16 mainnet, 19 testnet/devnet). */
+  p2shPrefix: number;
   wifPrefix: number;
   minFee: number;
   dustThreshold: number;
@@ -36,6 +38,7 @@ export const TESTNET: NetworkConfig = {
   name: 'testnet',
   insightApiUrl: 'https://insight.testnet.networks.dash.org/insight-api',
   addressPrefix: 140,
+  p2shPrefix: 19,
   wifPrefix: 239,
   minFee: 1000,
   dustThreshold: 546,
@@ -49,6 +52,7 @@ export const MAINNET: NetworkConfig = {
   name: 'mainnet',
   insightApiUrl: 'https://insight.dash.org/insight-api',
   addressPrefix: 76,
+  p2shPrefix: 16,
   wifPrefix: 204,
   minFee: 1000,
   dustThreshold: 546,
@@ -61,6 +65,7 @@ export const DEVNET_PALOMA: NetworkConfig = {
   name: 'devnet-paloma',
   insightApiUrl: 'https://insight.paloma.networks.dash.org/insight-api',
   addressPrefix: 140,
+  p2shPrefix: 19,
   wifPrefix: 239,
   minFee: 1000,
   dustThreshold: 546,
@@ -108,7 +113,7 @@ function loadCustomDevnets(): NetworkConfig[] {
     if (!stored) return [];
     const parsed = JSON.parse(stored);
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
+    const valid = parsed.filter(
       (c): c is NetworkConfig =>
         c &&
         typeof c.name === 'string' &&
@@ -126,6 +131,8 @@ function loadCustomDevnets(): NetworkConfig[] {
         (c.useTrustedContext === undefined || typeof c.useTrustedContext === 'boolean') &&
         (c.trustedQuorumUrl === undefined || typeof c.trustedQuorumUrl === 'string')
     );
+    // Devnets saved before p2shPrefix existed default to the testnet/devnet value.
+    return valid.map((c) => (typeof c.p2shPrefix === 'number' ? c : { ...c, p2shPrefix: 19 }));
   } catch {
     return [];
   }
@@ -164,6 +171,7 @@ export function createCustomDevnetConfig(params: {
     name: params.name,
     insightApiUrl: params.insightApiUrl,
     addressPrefix: 140,
+    p2shPrefix: 19,
     wifPrefix: 239,
     minFee: 1000,
     dustThreshold: 546,

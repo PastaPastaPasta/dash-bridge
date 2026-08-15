@@ -1,6 +1,23 @@
 import { describe, it, expect } from 'vitest';
 
-import { ErrorCodes, createInitialState, getStepDescription, setError } from './state.js';
+import {
+  ErrorCodes,
+  createInitialState,
+  getStepDescription,
+  setError,
+  setMode,
+  setWithdrawIdentityFetching,
+  setWithdrawIdentityFetched,
+  setWithdrawKeyValidated,
+  setWithdrawKeyValidationError,
+  setWithdrawAmountError,
+  setWithdrawAddress,
+  setWithdrawSubmitting,
+  setWithdrawSubmitted,
+  setWithdrawSubmitError,
+  setWithdrawStatusUpdate,
+  setWithdrawTrackingTimeout,
+} from './state.js';
 import type { BridgeState } from '../types.js';
 
 function baseState(): BridgeState {
@@ -58,5 +75,111 @@ describe('setError chainlockFallbackAvailable gating', () => {
 describe('step descriptions', () => {
   it('uses explicit Dash Platform preparation copy for the key-generation step', () => {
     expect(getStepDescription('generating_keys')).toBe('Preparing Dash Platform...');
+  });
+});
+
+describe('withdraw mode state transitions', () => {
+  it('setMode withdraw enters withdraw_enter_identity with cleared fields', () => {
+    const dirty: BridgeState = {
+      ...baseState(),
+      withdrawPrivateKeyWif: 'someWif',
+      withdrawToAddress: 'yAddr',
+      withdrawAmountCredits: 5n,
+      withdrawStatus: 2,
+    };
+    const result = setMode(dirty, 'withdraw');
+    expect(result.step).toBe('withdraw_enter_identity');
+    expect(result.mode).toBe('withdraw');
+    expect(result.withdrawPrivateKeyWif).toBeUndefined();
+    expect(result.withdrawToAddress).toBeUndefined();
+    expect(result.withdrawAmountCredits).toBeUndefined();
+    expect(result.withdrawStatus).toBeUndefined();
+  });
+
+  it('switching to another mode clears withdraw-sensitive fields', () => {
+    const state: BridgeState = {
+      ...baseState(),
+      mode: 'withdraw',
+      withdrawPrivateKeyWif: 'someWif',
+      withdrawToAddress: 'yAddr',
+      withdrawAmountCredits: 5n,
+    };
+    const result = setMode(state, 'topup');
+    expect(result.withdrawPrivateKeyWif).toBeUndefined();
+    expect(result.withdrawToAddress).toBeUndefined();
+    expect(result.withdrawAmountCredits).toBeUndefined();
+  });
+
+  it('identity fetch success advances to configure with keys and balance', () => {
+    const fetching = setWithdrawIdentityFetching(baseState(), 'someIdentityId');
+    expect(fetching.withdrawIdentityFetching).toBe(true);
+    expect(fetching.targetIdentityId).toBe('someIdentityId');
+    const fetched = setWithdrawIdentityFetched(fetching, [], 123456n);
+    expect(fetched.step).toBe('withdraw_configure');
+    expect(fetched.withdrawIdentityFetching).toBe(false);
+    expect(fetched.withdrawBalance).toBe(123456n);
+  });
+
+  it('submit success moves to tracking with QUEUED status', () => {
+    const state = setWithdrawSubmitting(baseState());
+    expect(state.step).toBe('withdraw_submitting');
+    const submitted = setWithdrawSubmitted(state, 42n);
+    expect(submitted.step).toBe('withdraw_tracking');
+    expect(submitted.withdrawStatus).toBe(0);
+    expect(submitted.withdrawResult).toEqual({ success: true, remainingBalance: 42n });
+  });
+
+  it('submit error terminates with a failed result', () => {
+    const result = setWithdrawSubmitError(setWithdrawSubmitting(baseState()), 'boom');
+    expect(result.step).toBe('withdraw_complete');
+    expect(result.withdrawResult).toEqual({ success: false, error: 'boom' });
+  });
+
+  it('status updates stay in tracking until terminal', () => {
+    let state = setWithdrawSubmitted(setWithdrawSubmitting(baseState()), 42n);
+    state = setWithdrawStatusUpdate(state, 1);
+    expect(state.step).toBe('withdraw_tracking');
+    state = setWithdrawStatusUpdate(state, 2);
+    expect(state.step).toBe('withdraw_tracking');
+    state = setWithdrawStatusUpdate(state, 3);
+    expect(state.step).toBe('withdraw_complete');
+    expect(state.withdrawStatus).toBe(3);
+  });
+
+  it('EXPIRED status is terminal', () => {
+    const state = setWithdrawStatusUpdate(
+      setWithdrawSubmitted(setWithdrawSubmitting(baseState()), 42n),
+      4
+    );
+    expect(state.step).toBe('withdraw_complete');
+  });
+
+  it('tracking timeout completes without clearing the success result', () => {
+    const submitted = setWithdrawSubmitted(setWithdrawSubmitting(baseState()), 42n);
+    const timedOut = setWithdrawTrackingTimeout(submitted, 'still queued');
+    expect(timedOut.step).toBe('withdraw_complete');
+    expect(timedOut.withdrawResult?.success).toBe(true);
+    expect(timedOut.withdrawStatusError).toBe('still queued');
+  });
+
+  it('key validation error clears validated key material', () => {
+    const validated = setWithdrawKeyValidated(baseState(), 3, 3, 1, 'wif');
+    expect(validated.withdrawSigningKeyInfo).toEqual({ keyId: 3, purpose: 3, securityLevel: 1 });
+    const errored = setWithdrawKeyValidationError(validated, 'not a transfer key');
+    expect(errored.withdrawSigningKeyInfo).toBeUndefined();
+    expect(errored.withdrawPrivateKeyWif).toBeUndefined();
+    expect(errored.withdrawKeyValidationError).toBe('not a transfer key');
+  });
+
+  it('amount/address errors preserve raw input', () => {
+    const badAmount = setWithdrawAmountError(baseState(), '0.0000001', 'too small');
+    expect(badAmount.withdrawAmountInput).toBe('0.0000001');
+    expect(badAmount.withdrawAmountCredits).toBeUndefined();
+    const badAddress = setWithdrawAddress(baseState(), 'Xoops', 'wrong network');
+    expect(badAddress.withdrawToAddress).toBe('Xoops');
+    expect(badAddress.withdrawAddressError).toBe('wrong network');
+    const goodAddress = setWithdrawAddress(badAddress, 'yGoodAddr');
+    expect(goodAddress.withdrawToAddress).toBe('yGoodAddr');
+    expect(goodAddress.withdrawAddressError).toBeUndefined();
   });
 });
