@@ -14,3 +14,12 @@ export {
 } from './identity.js';
 
 export type { AddKeyConfig } from './identity.js';
+
+export {
+  withdrawCredits,
+  fetchLatestWithdrawalStatus,
+  WithdrawalStatus,
+  WITHDRAWALS_CONTRACT_ID,
+} from './withdrawal.js';
+
+export type { WithdrawResult, WithdrawalStatusRecord } from './withdrawal.js';

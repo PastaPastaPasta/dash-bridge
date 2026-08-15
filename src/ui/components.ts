@@ -3,6 +3,8 @@ import { getStepProgress, getStepDescription, ErrorCodes, ErrorCodeLabels } from
 import { shouldShowContestedWarning, countUsernameStatuses } from '../platform/dpns-utils.js';
 import { generateQRCodeDataUrl } from './qrcode.js';
 import { privateKeyToWif } from '../utils/wif.js';
+import { formatCreditsAsDash, formatCredits, MIN_WITHDRAWAL_CREDITS } from '../utils/credits.js';
+import { WithdrawalStatus } from '../platform/withdrawal-status.js';
 import { bytesToHex } from '../utils/hex.js';
 import { getNetwork, getAvailableNetworks } from '../config.js';
 import { getAssetLockDerivationPath } from '../crypto/hd.js';
@@ -320,6 +322,23 @@ export function render(state: BridgeState, container: HTMLElement): void {
     case 'contract_complete':
       content.appendChild(renderContractCompleteStep(state));
       break;
+
+    // Withdraw steps
+    case 'withdraw_enter_identity':
+      content.appendChild(renderWithdrawEnterIdentityStep(state));
+      break;
+    case 'withdraw_configure':
+      content.appendChild(renderWithdrawConfigureStep(state));
+      break;
+    case 'withdraw_submitting':
+      content.appendChild(renderWithdrawSubmittingStep(state));
+      break;
+    case 'withdraw_tracking':
+      content.appendChild(renderWithdrawTrackingStep(state));
+      break;
+    case 'withdraw_complete':
+      content.appendChild(renderWithdrawCompleteStep(state));
+      break;
   }
 
   wrapper.appendChild(content);
@@ -403,6 +422,10 @@ function renderInitStep(state: BridgeState): HTMLElement {
     <button id="mode-contract-btn" class="mode-btn secondary-btn">
       <span class="mode-label">Register Data Contract</span>
       <span class="mode-desc">Publish a data contract on Dash Platform</span>
+    </button>
+    <button id="mode-withdraw-btn" class="mode-btn secondary-btn">
+      <span class="mode-label">Withdraw Credits</span>
+      <span class="mode-desc">Send Platform credits back to a Dash Core address</span>
     </button>
   `;
   div.appendChild(modeButtons);
@@ -1118,6 +1141,18 @@ function buildErrorDiagnostics(state: BridgeState): Record<string, unknown> {
   // Count only — ManageNewKeyConfig objects contain private key material
   if (state.manageKeysToAdd?.length) diag.manageKeysToAddCount = state.manageKeysToAdd.length;
   if (state.manageKeyIdsToDisable?.length) diag.manageKeyIdsToDisable = state.manageKeyIdsToDisable;
+
+  // Withdraw context — counts and public data only, never key material
+  if (state.withdrawSigningKeyInfo) diag.withdrawSigningKeyInfo = state.withdrawSigningKeyInfo;
+  if (state.withdrawToAddress) diag.withdrawToAddress = state.withdrawToAddress;
+  if (state.withdrawAmountCredits !== undefined) diag.withdrawAmountCredits = String(state.withdrawAmountCredits);
+  if (state.withdrawStatus !== undefined) diag.withdrawStatus = state.withdrawStatus;
+  if (state.withdrawResult) {
+    diag.withdrawResult = {
+      success: state.withdrawResult.success,
+      error: state.withdrawResult.error ?? null,
+    };
+  }
 
   // Retry state
   if (state.retryStatus) diag.retryStatus = state.retryStatus;
@@ -2245,6 +2280,377 @@ function renderManageCompleteStep(state: BridgeState): HTMLElement {
 
   const startOverBtn = document.createElement('button');
   startOverBtn.id = 'retry-btn';
+  startOverBtn.className = 'secondary-btn';
+  startOverBtn.textContent = 'Start Over';
+  actionButtons.appendChild(startOverBtn);
+
+  div.appendChild(actionButtons);
+
+  return div;
+}
+
+// ============================================================================
+// Withdraw (Asset Unlock) Steps
+// ============================================================================
+
+/** Withdrawal document statuses, in payout order. */
+const WITHDRAW_STATUS_LABELS: { status: number; label: string }[] = [
+  { status: WithdrawalStatus.QUEUED, label: 'Queued' },
+  { status: WithdrawalStatus.POOLED, label: 'Pooled' },
+  { status: WithdrawalStatus.BROADCASTED, label: 'Broadcast to Core' },
+  { status: WithdrawalStatus.COMPLETE, label: 'Complete' },
+];
+
+function renderWithdrawEnterIdentityStep(state: BridgeState): HTMLElement {
+  const div = document.createElement('div');
+  div.className = 'withdraw-enter-identity-step';
+  div.id = 'withdraw-key-upload-dropzone';
+
+  const headline = document.createElement('h2');
+  headline.className = 'manage-headline';
+  headline.textContent = 'Withdraw Credits';
+  div.appendChild(headline);
+
+  const subtitle = document.createElement('p');
+  subtitle.className = 'manage-subtitle';
+  subtitle.textContent = 'Send Platform credits from your identity back to a Dash Core address.';
+  div.appendChild(subtitle);
+
+  const form = document.createElement('div');
+  form.className = 'manage-identity-form';
+
+  const isFetching = state.withdrawIdentityFetching === true;
+  const hasFetchError = state.withdrawIdentityFetchError !== undefined;
+
+  let identityStatusHtml = '';
+  if (isFetching) {
+    identityStatusHtml = '<p class="identity-status loading">Fetching identity...</p>';
+  } else if (hasFetchError) {
+    identityStatusHtml = `<p class="identity-status error">${escapeHtml(state.withdrawIdentityFetchError!)}</p>`;
+  }
+
+  form.innerHTML = `
+    ${renderKeyUploadSection('withdraw-key-upload')}
+
+    <div class="input-group">
+      <label class="input-label" for="withdraw-identity-id-input">Identity ID</label>
+      <input
+        type="text"
+        id="withdraw-identity-id-input"
+        class="manage-input"
+        placeholder="Your 44-character identity ID..."
+        value="${escapeAttr(state.targetIdentityId || '')}"
+        ${isFetching ? 'disabled' : ''}
+      />
+      <p class="input-hint">The Base58 identifier for the identity to withdraw from</p>
+      ${identityStatusHtml}
+    </div>
+  `;
+  div.appendChild(form);
+
+  const navButtons = document.createElement('div');
+  navButtons.className = 'nav-buttons';
+
+  const backBtn = document.createElement('button');
+  backBtn.id = 'withdraw-back-btn';
+  backBtn.className = 'secondary-btn';
+  backBtn.textContent = 'Back';
+  navButtons.appendChild(backBtn);
+
+  div.appendChild(navButtons);
+
+  return div;
+}
+
+function renderWithdrawConfigureStep(state: BridgeState): HTMLElement {
+  const div = document.createElement('div');
+  div.className = 'withdraw-configure-step';
+
+  const headline = document.createElement('h2');
+  headline.className = 'manage-headline';
+  headline.textContent = 'Configure Withdrawal';
+  div.appendChild(headline);
+
+  // Identity + balance summary
+  const balance = state.withdrawBalance ?? 0n;
+  const summary = document.createElement('div');
+  summary.className = 'withdraw-identity-summary';
+  summary.innerHTML = `
+    <p class="withdraw-identity-id"><code>${escapeHtml(state.targetIdentityId || '')}</code></p>
+    <p class="withdraw-balance">Balance: <strong>${escapeHtml(formatCreditsAsDash(balance))} DASH</strong> (${escapeHtml(formatCredits(balance))} credits)</p>
+  `;
+  div.appendChild(summary);
+
+  const hasValidatedKey = state.withdrawSigningKeyInfo !== undefined;
+  const hasKeyError = state.withdrawKeyValidationError !== undefined;
+
+  let keyValidationHtml = '';
+  if (hasValidatedKey) {
+    const info = state.withdrawSigningKeyInfo!;
+    keyValidationHtml = `<p class="key-status success">Key matches key #${info.keyId} (${getKeyPurposeName(info.purpose)} / ${getSecurityLevelName(info.securityLevel)})</p>`;
+  } else if (hasKeyError) {
+    keyValidationHtml = `<p class="key-status error">${escapeHtml(state.withdrawKeyValidationError!)}</p>`;
+  }
+
+  const addressErrorHtml = state.withdrawAddressError
+    ? `<p class="key-status error" id="withdraw-address-error">${escapeHtml(state.withdrawAddressError)}</p>`
+    : '';
+
+  const amountErrorHtml = state.withdrawAmountError
+    ? `<p class="key-status error" id="withdraw-amount-error">${escapeHtml(state.withdrawAmountError)}</p>`
+    : '';
+
+  const amountCaption = state.withdrawAmountCredits !== undefined
+    ? `<p class="input-hint" id="withdraw-amount-credits">= ${escapeHtml(formatCredits(state.withdrawAmountCredits))} credits</p>`
+    : `<p class="input-hint" id="withdraw-amount-credits">Amount in DASH (min ${formatCreditsAsDash(MIN_WITHDRAWAL_CREDITS)})</p>`;
+
+  const form = document.createElement('div');
+  form.className = 'manage-identity-form';
+  form.innerHTML = `
+    <div class="input-group">
+      <label class="input-label" for="withdraw-private-key-input">Transfer Private Key (WIF)</label>
+      <input
+        type="password"
+        id="withdraw-private-key-input"
+        class="manage-input"
+        placeholder="Your TRANSFER private key in WIF format..."
+      />
+      <p class="input-hint">Withdrawals must be signed with a TRANSFER key. Identities created by this bridge have it at HD index 3.</p>
+      ${keyValidationHtml}
+    </div>
+
+    <div class="input-group">
+      <label class="input-label" for="withdraw-address-input">Destination Dash Address</label>
+      <input
+        type="text"
+        id="withdraw-address-input"
+        class="manage-input"
+        placeholder="Dash Core address to receive the funds..."
+        value="${escapeAttr(state.withdrawToAddress || '')}"
+      />
+      <p class="input-hint">A Dash Core (L1) address on ${escapeHtml(state.network)}</p>
+      ${addressErrorHtml}
+    </div>
+
+    <div class="input-group">
+      <label class="input-label" for="withdraw-amount-input">Amount (DASH)</label>
+      <div class="withdraw-amount-row">
+        <input
+          type="text"
+          inputmode="decimal"
+          id="withdraw-amount-input"
+          class="manage-input"
+          placeholder="0.001"
+          value="${escapeAttr(state.withdrawAmountInput || '')}"
+        />
+        <button id="withdraw-max-btn" class="tertiary-btn">Max</button>
+      </div>
+      ${amountCaption}
+      ${amountErrorHtml}
+    </div>
+
+    <div class="withdraw-fee-note">
+      <p class="input-hint">The Core network mining fee (~190 duffs) is deducted from the withdrawn amount. Payouts are batched by the network and typically take a few minutes.</p>
+    </div>
+  `;
+  div.appendChild(form);
+
+  const navButtons = document.createElement('div');
+  navButtons.className = 'nav-buttons';
+
+  const backBtn = document.createElement('button');
+  backBtn.id = 'withdraw-back-btn';
+  backBtn.className = 'secondary-btn';
+  backBtn.textContent = 'Back';
+  navButtons.appendChild(backBtn);
+
+  const submitBtn = document.createElement('button');
+  submitBtn.id = 'withdraw-submit-btn';
+  submitBtn.className = 'primary-btn';
+  submitBtn.textContent = 'Withdraw';
+  const canSubmit =
+    hasValidatedKey &&
+    state.withdrawToAddress !== undefined &&
+    state.withdrawAddressError === undefined &&
+    state.withdrawAmountCredits !== undefined;
+  if (!canSubmit) {
+    submitBtn.setAttribute('disabled', 'true');
+  }
+  navButtons.appendChild(submitBtn);
+
+  div.appendChild(navButtons);
+
+  return div;
+}
+
+function renderWithdrawSubmittingStep(_state: BridgeState): HTMLElement {
+  const div = document.createElement('div');
+  div.className = 'withdraw-submitting-step';
+
+  const headline = document.createElement('h2');
+  headline.className = 'manage-headline';
+  headline.textContent = 'Submitting Withdrawal';
+  div.appendChild(headline);
+
+  const subtitle = document.createElement('p');
+  subtitle.className = 'manage-subtitle';
+  subtitle.textContent = 'Signing and broadcasting the credit withdrawal to Dash Platform...';
+  div.appendChild(subtitle);
+
+  const spinner = document.createElement('div');
+  spinner.className = 'spinner large';
+  div.appendChild(spinner);
+
+  return div;
+}
+
+function renderWithdrawTrackingStep(state: BridgeState): HTMLElement {
+  const div = document.createElement('div');
+  div.className = 'withdraw-tracking-step';
+
+  const headline = document.createElement('h2');
+  headline.className = 'manage-headline';
+  headline.textContent = 'Processing Withdrawal';
+  div.appendChild(headline);
+
+  const subtitle = document.createElement('p');
+  subtitle.className = 'manage-subtitle';
+  subtitle.textContent = 'Your withdrawal was accepted. The network is preparing the Core payout transaction.';
+  div.appendChild(subtitle);
+
+  const currentStatus = state.withdrawStatus ?? 0;
+  const timeline = document.createElement('div');
+  timeline.className = 'withdraw-status-timeline';
+  timeline.innerHTML = WITHDRAW_STATUS_LABELS.map(({ status, label }) => {
+    let cls = 'pending';
+    if (status < currentStatus) {
+      cls = 'done';
+    } else if (status === currentStatus) {
+      cls = 'active';
+    }
+    return `<div class="withdraw-status-item ${cls}" data-status="${status}">
+      <span class="withdraw-status-dot"></span>
+      <span class="withdraw-status-label">${escapeHtml(label)}</span>
+    </div>`;
+  }).join('');
+  div.appendChild(timeline);
+
+  const spinner = document.createElement('div');
+  spinner.className = 'spinner';
+  div.appendChild(spinner);
+
+  if (state.withdrawStatusError) {
+    const pollNote = document.createElement('p');
+    pollNote.className = 'withdraw-poll-warning';
+    pollNote.textContent = state.withdrawStatusError;
+    div.appendChild(pollNote);
+  }
+
+  const note = document.createElement('p');
+  note.className = 'input-hint';
+  note.textContent = 'Payouts are batched by the validator network and can take several minutes. During heavy network volume (daily withdrawal limit), a withdrawal can stay queued longer — that is normal, not a failure.';
+  div.appendChild(note);
+
+  const navButtons = document.createElement('div');
+  navButtons.className = 'nav-buttons';
+
+  const doneBtn = document.createElement('button');
+  doneBtn.id = 'withdraw-tracking-done-btn';
+  doneBtn.className = 'secondary-btn';
+  doneBtn.textContent = 'Continue in Background';
+  navButtons.appendChild(doneBtn);
+
+  div.appendChild(navButtons);
+
+  return div;
+}
+
+function renderWithdrawCompleteStep(state: BridgeState): HTMLElement {
+  const div = document.createElement('div');
+  div.className = 'withdraw-complete-step';
+
+  const result = state.withdrawResult;
+  const isSuccess = result?.success === true;
+  const status = state.withdrawStatus;
+
+  const headline = document.createElement('h2');
+  headline.className = 'manage-headline';
+  if (!isSuccess) {
+    headline.textContent = 'Withdrawal Failed';
+  } else if (status === WithdrawalStatus.EXPIRED) {
+    headline.textContent = 'Withdrawal Expired';
+  } else if (status === WithdrawalStatus.COMPLETE) {
+    headline.textContent = 'Withdrawal Complete!';
+  } else {
+    headline.textContent = 'Withdrawal Submitted';
+  }
+  div.appendChild(headline);
+
+  if (isSuccess) {
+    const details = document.createElement('div');
+    details.className = 'withdraw-success-details';
+
+    const amount = state.withdrawAmountCredits;
+    const amountHtml = amount !== undefined
+      ? `<p>Amount: <strong>${escapeHtml(formatCreditsAsDash(amount))} DASH</strong> (${escapeHtml(formatCredits(amount))} credits)</p>`
+      : '';
+    const remaining = result?.remainingBalance;
+    const remainingHtml = remaining !== undefined
+      ? `<p>Remaining balance: <strong>${escapeHtml(formatCreditsAsDash(remaining))} DASH</strong></p>`
+      : '';
+    details.innerHTML = `
+      ${amountHtml}
+      <p>Destination: <code>${escapeHtml(state.withdrawToAddress || '')}</code></p>
+      ${remainingHtml}
+    `;
+    div.appendChild(details);
+
+    if (status === WithdrawalStatus.COMPLETE) {
+      const msg = document.createElement('p');
+      msg.className = 'withdraw-success-msg';
+      msg.textContent = 'The payout transaction has been chain-locked on Dash Core. Funds should appear in your wallet.';
+      div.appendChild(msg);
+    } else if (status === WithdrawalStatus.EXPIRED) {
+      const msg = document.createElement('p');
+      msg.className = 'withdraw-expired-msg';
+      msg.textContent = 'The payout transaction expired before it was mined. The network automatically re-broadcasts expired withdrawals; if the funds do not arrive, the credits are returned to your identity.';
+      div.appendChild(msg);
+    } else if (state.withdrawStatusError) {
+      const msg = document.createElement('p');
+      msg.className = 'withdraw-pending-msg';
+      msg.textContent = state.withdrawStatusError;
+      div.appendChild(msg);
+    }
+  } else {
+    const errorMsg = document.createElement('div');
+    errorMsg.className = 'withdraw-error-msg';
+    errorMsg.innerHTML = `
+      <p>The withdrawal could not be completed. Your credits have not left the identity unless the error occurred after broadcast.</p>
+      <p class="error-detail">${escapeHtml(result?.error || 'Unknown error')} <span class="error-code">(${ErrorCodes.WITHDRAW})</span></p>
+    `;
+    div.appendChild(errorMsg);
+  }
+
+  // Identity info with copy + explorer link
+  const withdrawIdentityId = state.targetIdentityId || 'Unknown';
+  div.appendChild(renderIdSection('Identity ID', withdrawIdentityId, {
+    explorerHref: withdrawIdentityId !== 'Unknown' ? explorerUrl(state.network, 'identity', withdrawIdentityId) : undefined,
+    copyBtnId: 'copy-withdraw-identity-btn',
+  }));
+
+  const actionButtons = document.createElement('div');
+  actionButtons.className = 'withdraw-action-buttons nav-buttons';
+
+  if (!isSuccess) {
+    const retryBtn = document.createElement('button');
+    retryBtn.id = 'withdraw-retry-btn';
+    retryBtn.className = 'primary-btn';
+    retryBtn.textContent = 'Try Again';
+    actionButtons.appendChild(retryBtn);
+  }
+
+  const startOverBtn = document.createElement('button');
+  startOverBtn.id = 'withdraw-start-over-btn';
   startOverBtn.className = 'secondary-btn';
   startOverBtn.textContent = 'Start Over';
   actionButtons.appendChild(startOverBtn);

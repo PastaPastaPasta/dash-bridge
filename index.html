@@ -2772,6 +2772,135 @@
         padding: 8px 10px;
       }
     }
+
+    /* ============================================================================
+       Withdraw (Asset Unlock) Styles
+       ============================================================================ */
+
+    .withdraw-identity-summary {
+      background: rgba(0, 0, 0, 0.2);
+      border-radius: 10px;
+      padding: 14px 16px;
+      margin-bottom: 20px;
+      text-align: left;
+    }
+
+    .withdraw-identity-summary .withdraw-identity-id code {
+      font-size: 0.8rem;
+      color: #b0b0b0;
+      word-break: break-all;
+    }
+
+    .withdraw-identity-summary .withdraw-balance {
+      color: #fff;
+      margin-top: 6px;
+    }
+
+    .withdraw-amount-row {
+      display: flex;
+      gap: 8px;
+      align-items: stretch;
+    }
+
+    .withdraw-amount-row .manage-input {
+      flex: 1;
+    }
+
+    .withdraw-fee-note {
+      background: rgba(0, 141, 228, 0.08);
+      border: 1px solid rgba(0, 141, 228, 0.2);
+      border-radius: 10px;
+      padding: 10px 14px;
+      margin-bottom: 16px;
+      text-align: left;
+    }
+
+    .withdraw-status-timeline {
+      display: flex;
+      justify-content: center;
+      gap: 18px;
+      margin: 24px 0;
+      flex-wrap: wrap;
+    }
+
+    .withdraw-status-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      color: #9a9aa5; /* keeps small pending labels above WCAG AA 4.5:1 on the dark background */
+      font-size: 0.8rem;
+    }
+
+    .withdraw-status-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.15);
+    }
+
+    .withdraw-status-item.done .withdraw-status-dot {
+      background: #4caf50;
+    }
+
+    .withdraw-status-item.done {
+      color: #4caf50;
+    }
+
+    .withdraw-status-item.active .withdraw-status-dot {
+      background: #008de4;
+      box-shadow: 0 0 8px rgba(0, 141, 228, 0.7);
+    }
+
+    .withdraw-status-item.active {
+      color: #fff;
+    }
+
+    .withdraw-poll-warning {
+      color: #ffb74d;
+      font-size: 0.85rem;
+      margin: 12px 0;
+    }
+
+    .withdraw-success-details {
+      background: rgba(0, 0, 0, 0.2);
+      border-radius: 10px;
+      padding: 14px 16px;
+      margin-bottom: 16px;
+      text-align: left;
+      color: #ddd;
+    }
+
+    .withdraw-success-details code {
+      word-break: break-all;
+      font-size: 0.85rem;
+    }
+
+    .withdraw-success-msg {
+      color: #4caf50;
+      margin-bottom: 16px;
+    }
+
+    .withdraw-expired-msg,
+    .withdraw-pending-msg {
+      color: #ffb74d;
+      margin-bottom: 16px;
+    }
+
+    .withdraw-error-msg {
+      background: rgba(244, 67, 54, 0.1);
+      border: 1px solid rgba(244, 67, 54, 0.3);
+      border-radius: 10px;
+      padding: 14px 16px;
+      margin-bottom: 16px;
+      text-align: left;
+    }
+
+    .withdraw-error-msg .error-detail {
+      color: #ef9a9a;
+      font-size: 0.85rem;
+      word-break: break-word;
+    }
   </style>
 </head>
 <body>

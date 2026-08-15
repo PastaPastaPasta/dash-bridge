@@ -1,5 +1,12 @@
 import { getNetwork, initNetworkRegistry, createCustomDevnetConfig, saveCustomDevnet, isReservedNetworkName, MAINNET, TESTNET } from './config.js';
-import { publicKeyToAddress, signTransaction, generateKeyPair } from './crypto/index.js';
+import { publicKeyToAddress, signTransaction, generateKeyPair, validateCoreAddress } from './crypto/index.js';
+import {
+  formatCreditsAsDash,
+  MIN_WITHDRAWAL_CREDITS,
+  maxWithdrawableCredits,
+  validateWithdrawalAmount,
+} from './utils/credits.js';
+import { extractErrorMessage } from './utils/errors.js';
 import { deriveAssetLockKeyPair } from './crypto/hd.js';
 import { createAssetLockTransaction, serializeTransaction, calculateTxId } from './transaction/index.js';
 import { InsightClient } from './api/insight.js';
@@ -89,6 +96,24 @@ import {
   setContractComplete,
   setModeContractFromIdentity,
   setContractStartBridge,
+  // Withdraw state functions
+  setWithdrawIdentityFetching,
+  setWithdrawIdentityFetched,
+  setWithdrawIdentityFetchError,
+  setWithdrawKeyValidated,
+  setWithdrawKeyValidationError,
+  clearWithdrawKeyValidation,
+  setWithdrawAddress,
+  setWithdrawAmount,
+  setWithdrawAmountError,
+  setWithdrawSubmitting,
+  setWithdrawSubmitted,
+  setWithdrawSubmitError,
+  setWithdrawStatusUpdate,
+  setWithdrawStatusNote,
+  setWithdrawTrackingTimeout,
+  setWithdrawBackToEntry,
+  setWithdrawRetry,
   // Faucet state functions
   setFaucetSolvingPow,
   setFaucetRequesting,
@@ -137,6 +162,8 @@ import {
   E2E_MOCK_DPNS_WIF,
   E2E_MOCK_IDENTITY_ID,
   E2E_MOCK_MANAGE_WIF,
+  E2E_MOCK_WITHDRAW_WIF,
+  E2E_MOCK_WITHDRAW_BALANCE,
 } from './e2e-mock-constants.js';
 
 // Global state
@@ -469,6 +496,9 @@ function init() {
     if (contractParam) {
       void hydrateContractDeepLink(contractParam);
     }
+  } else if (modeParam === 'withdraw') {
+    // Deep-link: ?mode=withdraw opens credit withdrawal mode
+    state = setMode(state, 'withdraw');
   }
 
   // Render UI
@@ -1433,6 +1463,7 @@ function setupEventListeners(container: HTMLElement) {
   function wireKeyUpload(
     inputId: string,
     onParsed: (result: { identityId: string; privateKeyWif: string }) => void,
+    preferredPurpose?: string,
   ) {
     const fileInput = container.querySelector<HTMLInputElement>(`#${inputId}`);
     const dropzone = container.querySelector<HTMLElement>(`#${inputId}-dropzone`);
@@ -1444,7 +1475,7 @@ function setupEventListeners(container: HTMLElement) {
       reader.onload = () => {
         try {
           const json = JSON.parse(reader.result as string);
-          const parsed = parseKeyBackup(json);
+          const parsed = parseKeyBackup(json, preferredPurpose);
           if (!parsed) {
             if (statusEl) { statusEl.textContent = 'No identity or keys found in file'; statusEl.className = 'key-upload-status error'; }
             return;
@@ -1541,6 +1572,245 @@ function setupEventListeners(container: HTMLElement) {
       updateState({ ...setContractIdentityFetchError(state, error instanceof Error ? error.message : String(error)), contractPrivateKeyWif: result.privateKeyWif });
     }
   });
+
+  // ============================================================================
+  // Withdraw Event Listeners
+  // ============================================================================
+
+  // Withdraw key upload — prefer the TRANSFER key from the backup, fetch
+  // identity + balance, validate, and land on the configure step in one shot
+  wireKeyUpload('withdraw-key-upload', async (result) => {
+    updateState(setWithdrawIdentityFetching(state, result.identityId));
+    try {
+      const [keys, identityState] = await Promise.all([
+        getIdentityPublicKeys(result.identityId, state.network),
+        getIdentityBalanceAndRevision(result.identityId, state.network),
+      ]);
+      let finalState = setWithdrawIdentityFetched(state, keys, BigInt(identityState.balance));
+      const match = findMatchingKeyIndex(result.privateKeyWif, keys, state.network);
+      if (match && match.purpose === 3 /* TRANSFER */) {
+        finalState = setWithdrawKeyValidated(finalState, match.keyId, match.purpose, match.securityLevel, result.privateKeyWif);
+      } else if (match) {
+        finalState = {
+          ...finalState,
+          withdrawKeyValidationError: `The backup's ${getPurposeName(match.purpose)} key cannot sign withdrawals — a TRANSFER key is required.`,
+        };
+      } else {
+        finalState = {
+          ...finalState,
+          withdrawKeyValidationError: 'No key in the backup matches this identity',
+        };
+      }
+      updateState(finalState);
+    } catch (error) {
+      updateState(setWithdrawIdentityFetchError(state, error instanceof Error ? error.message : String(error)));
+    }
+  }, 'TRANSFER');
+
+  // Withdraw mode button (init page)
+  const modeWithdrawBtn = container.querySelector('#mode-withdraw-btn');
+  attachDashWarmup(modeWithdrawBtn);
+  if (modeWithdrawBtn) {
+    modeWithdrawBtn.addEventListener('click', () => {
+      updateState(setMode(state, 'withdraw'));
+    });
+  }
+
+  // Withdraw back button (enter identity / configure steps)
+  const withdrawBackBtn = container.querySelector('#withdraw-back-btn');
+  if (withdrawBackBtn) {
+    withdrawBackBtn.addEventListener('click', () => {
+      switch (state.step) {
+        case 'withdraw_configure':
+          updateState(setWithdrawBackToEntry(state));
+          break;
+        default:
+          updateState(setStep(state, 'init'));
+      }
+    });
+  }
+
+  // Wire the standard "validate on blur, and shortly after paste" input pattern.
+  const onBlurOrPaste = (
+    selector: string,
+    handler: (input: HTMLInputElement) => void
+  ): HTMLInputElement | null => {
+    const input = container.querySelector<HTMLInputElement>(selector);
+    if (!input) return null;
+    const run = () => handler(input);
+    input.addEventListener('blur', run);
+    input.addEventListener('paste', () => setTimeout(run, 50));
+    return input;
+  };
+
+  // Withdraw identity ID input - fetch identity + balance
+  onBlurOrPaste('#withdraw-identity-id-input', async (input) => {
+    const identityId = input.value.trim();
+
+    if (!identityId || state.withdrawIdentityFetching) {
+      return;
+    }
+
+    // Skip if this identity is already fetched — refetching would clear a
+    // validated TRANSFER key and repeat two network calls for no change.
+    if (state.targetIdentityId === identityId && state.withdrawIdentityKeys) {
+      return;
+    }
+
+    if (!validateIdentityId(identityId)) {
+      updateState(setWithdrawIdentityFetchError(state, 'Invalid identity ID format (expected 44 character Base58 string)'));
+      return;
+    }
+
+    updateState(setWithdrawIdentityFetching(state, identityId));
+
+    try {
+      if (isE2EMockMode()) {
+        await delay(30);
+        updateState(setWithdrawIdentityFetched(state, createE2EMockIdentityKeys(), BigInt(E2E_MOCK_WITHDRAW_BALANCE)));
+        return;
+      }
+
+      const [keys, identityState] = await Promise.all([
+        getIdentityPublicKeys(identityId, state.network),
+        getIdentityBalanceAndRevision(identityId, state.network),
+      ]);
+      updateState(setWithdrawIdentityFetched(state, keys, BigInt(identityState.balance)));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to fetch identity';
+      updateState(setWithdrawIdentityFetchError(state, message));
+    }
+  });
+
+  // Withdraw private key input - must match a TRANSFER key on the identity
+  onBlurOrPaste('#withdraw-private-key-input', (input) => {
+    const privateKeyWif = input.value.trim();
+
+    // The WIF is deliberately never rendered back into the DOM, so the field
+    // is blank after every re-render. An empty blur is a no-op (a validated
+    // key stays validated); entering a new key replaces the old one.
+    if (!privateKeyWif) {
+      if (!state.withdrawSigningKeyInfo && state.withdrawKeyValidationError) {
+        updateState(clearWithdrawKeyValidation(state));
+      }
+      return;
+    }
+
+    if (!state.withdrawIdentityKeys || state.withdrawIdentityKeys.length === 0) {
+      updateState(setWithdrawKeyValidationError(state, 'Please enter an identity ID first'));
+      return;
+    }
+
+    if (isE2EMockMode()) {
+      if (privateKeyWif === E2E_MOCK_WITHDRAW_WIF) {
+        updateState(setWithdrawKeyValidated(state, 3, 3, 1, privateKeyWif));
+      } else {
+        updateState(setWithdrawKeyValidationError(state, 'Mock mode: use the configured test private key'));
+      }
+      return;
+    }
+
+    const match = findMatchingKeyIndex(privateKeyWif, state.withdrawIdentityKeys, state.network);
+
+    if (!match) {
+      updateState(setWithdrawKeyValidationError(state, 'This key does not match any key registered with this identity'));
+      return;
+    }
+
+    // Withdrawals to an address must be signed with a TRANSFER key (purpose 3).
+    // OWNER keys are rejected by consensus when a destination address is set.
+    if (match.purpose !== 3) {
+      const purposeName = getPurposeName(match.purpose);
+      updateState(setWithdrawKeyValidationError(
+        state,
+        `This key has ${purposeName} purpose. Withdrawals must be signed with a TRANSFER key (identities created by this bridge have one at HD index 3).`
+      ));
+      return;
+    }
+
+    updateState(setWithdrawKeyValidated(state, match.keyId, match.purpose, match.securityLevel, privateKeyWif));
+  });
+
+  // Withdraw destination address input
+  onBlurOrPaste('#withdraw-address-input', (input) => {
+    const address = input.value.trim();
+
+    if (!address) {
+      updateState(setWithdrawAddress(state, ''));
+      return;
+    }
+
+    const result = validateCoreAddress(address, getNetwork(state.network));
+    updateState(setWithdrawAddress(state, address, result.valid ? undefined : result.error || 'Invalid address'));
+  });
+
+  // Withdraw amount input
+  const withdrawAmountInput = onBlurOrPaste('#withdraw-amount-input', (input) => {
+    const raw = input.value.trim();
+
+    if (!raw) {
+      updateState(setWithdrawAmountError(state, '', ''));
+      return;
+    }
+
+    const result = validateWithdrawalAmount(raw, state.withdrawBalance ?? 0n);
+    if ('error' in result) {
+      updateState(setWithdrawAmountError(state, raw, result.error));
+    } else {
+      updateState(setWithdrawAmount(state, result.credits, raw));
+    }
+  });
+
+  // Max button: fill with balance minus a reserve for the Platform transition fee
+  if (withdrawAmountInput) {
+    const withdrawMaxBtn = container.querySelector('#withdraw-max-btn');
+    if (withdrawMaxBtn) {
+      withdrawMaxBtn.addEventListener('click', () => {
+        const max = maxWithdrawableCredits(state.withdrawBalance ?? 0n);
+        if (max < MIN_WITHDRAWAL_CREDITS) {
+          updateState(setWithdrawAmountError(state, '', `Balance is too small to withdraw (minimum ${formatCreditsAsDash(MIN_WITHDRAWAL_CREDITS)} DASH plus fees)`));
+          return;
+        }
+        const raw = formatCreditsAsDash(max);
+        withdrawAmountInput.value = raw;
+        updateState(setWithdrawAmount(state, max, raw));
+      });
+    }
+  }
+
+  // Withdraw submit button
+  const withdrawSubmitBtn = container.querySelector('#withdraw-submit-btn');
+  if (withdrawSubmitBtn) {
+    withdrawSubmitBtn.addEventListener('click', () => {
+      startWithdrawal();
+    });
+  }
+
+  // Withdraw tracking: leave polling but keep the success result
+  const withdrawTrackingDoneBtn = container.querySelector('#withdraw-tracking-done-btn');
+  if (withdrawTrackingDoneBtn) {
+    withdrawTrackingDoneBtn.addEventListener('click', () => {
+      updateState(setWithdrawTrackingTimeout(
+        state,
+        'Your withdrawal was accepted and continues processing on the network. The payout will arrive at the destination address; check your Core wallet.'
+      ));
+    });
+  }
+
+  // Withdraw complete: retry / start over
+  const withdrawRetryBtn = container.querySelector('#withdraw-retry-btn');
+  if (withdrawRetryBtn) {
+    withdrawRetryBtn.addEventListener('click', () => {
+      updateState(setWithdrawRetry(state));
+    });
+  }
+
+  const withdrawStartOverBtn = container.querySelector('#withdraw-start-over-btn');
+  if (withdrawStartOverBtn) {
+    withdrawStartOverBtn.addEventListener('click', () => {
+      updateState(setStep(state, 'init'));
+    });
+  }
 
   // ============================================================================
   // Contract Registration Event Listeners
@@ -1763,7 +2033,7 @@ function validateIdentityId(id?: string): boolean {
  * are required for DPNS and contract operations. MASTER keys are ranked lower
  * because they are rejected by isPurposeAllowedForDpns/isSecurityLevelAllowedForDpns.
  */
-function parseKeyBackup(json: unknown): { identityId: string; privateKeyWif: string; purpose: string; securityLevel: string } | null {
+function parseKeyBackup(json: unknown, preferredPurpose?: string): { identityId: string; privateKeyWif: string; purpose: string; securityLevel: string } | null {
   if (!json || typeof json !== 'object') return null;
   const obj = json as Record<string, unknown>;
   const identityId = (obj.identityId || obj.targetIdentityId) as string | undefined;
@@ -1775,6 +2045,12 @@ function parseKeyBackup(json: unknown): { identityId: string; privateKeyWif: str
   const ranked = keys
     .filter((k) => typeof k.privateKeyWif === 'string')
     .sort((a, b) => {
+      // Caller-preferred purpose wins outright (e.g. TRANSFER for withdrawals)
+      if (preferredPurpose) {
+        const aPref = a.purpose === preferredPurpose ? 1 : 0;
+        const bPref = b.purpose === preferredPurpose ? 1 : 0;
+        if (aPref !== bPref) return bPref - aPref;
+      }
       // Prefer AUTHENTICATION purpose
       const aAuth = a.purpose === 'AUTHENTICATION' ? 1 : 0;
       const bAuth = b.purpose === 'AUTHENTICATION' ? 1 : 0;
@@ -2912,6 +3188,160 @@ async function startManageUpdate() {
       success: false,
       error: errorMessage,
     }));
+  }
+}
+
+// ============================================================================
+// Withdraw Functions
+// ============================================================================
+
+const WITHDRAW_POLL_INTERVAL_MS = 10_000;
+const WITHDRAW_POLL_TIMEOUT_MS = 5 * 60_000;
+const WITHDRAW_POLL_FAILURE_WARNING_THRESHOLD = 5;
+
+async function startWithdrawal() {
+  const identityId = state.targetIdentityId;
+  const privateKeyWif = state.withdrawPrivateKeyWif;
+  const amountCredits = state.withdrawAmountCredits;
+  const toAddress = state.withdrawToAddress;
+
+  if (!identityId || !privateKeyWif || amountCredits === undefined || !toAddress) {
+    updateState(setWithdrawSubmitError(state, 'Missing withdrawal details'));
+    return;
+  }
+
+  updateState(setWithdrawSubmitting(state));
+
+  try {
+    if (isE2EMockMode()) {
+      await delay(80);
+      const mockRemaining = BigInt(E2E_MOCK_WITHDRAW_BALANCE) - amountCredits;
+      updateState(setWithdrawSubmitted(state, mockRemaining));
+      // Deterministically walk the payout statuses to completion
+      await delay(30);
+      updateState(setWithdrawStatusUpdate(state, 1)); // POOLED
+      await delay(30);
+      updateState(setWithdrawStatusUpdate(state, 3)); // COMPLETE
+      return;
+    }
+
+    // Capture before submitting so the withdrawal document (created when the
+    // transition is processed) is matched even with modest clock skew.
+    const sinceMs = Date.now() - 60_000;
+
+    const { withdrawCredits } = await loadPlatformModule();
+    const result = await withdrawCredits(
+      identityId,
+      privateKeyWif,
+      amountCredits,
+      toAddress,
+      state.network
+    );
+
+    if (result.timedOut) {
+      // Ambiguous outcome: the transition may already be broadcast, so a
+      // "failed" screen here would invite a double spend via retry. Track
+      // instead — the withdrawal document will show up if it went through.
+      updateState(setWithdrawStatusNote(
+        setWithdrawSubmitted(state),
+        'Confirmation timed out, but the withdrawal may still have been submitted — checking the network for it. Do not retry until the outcome is clear.'
+      ));
+      void pollWithdrawalStatus(identityId, sinceMs);
+      return;
+    }
+
+    if (!result.success || result.remainingBalance === undefined) {
+      // A non-timeout error can still have occurred AFTER broadcast (e.g.
+      // while waiting for the state transition result). Before offering a
+      // retryable failure screen, check whether the withdrawal actually
+      // landed — a second submission would withdraw twice.
+      if (await didWithdrawalLand(identityId, sinceMs)) {
+        updateState(setWithdrawStatusNote(
+          setWithdrawSubmitted(state),
+          'The submission reported an error, but the withdrawal was found on the network — tracking its payout instead.'
+        ));
+        void pollWithdrawalStatus(identityId, sinceMs);
+        return;
+      }
+      updateState(setWithdrawSubmitError(state, result.error || 'Withdrawal failed'));
+      return;
+    }
+
+    updateState(setWithdrawSubmitted(state, result.remainingBalance));
+    void pollWithdrawalStatus(identityId, sinceMs);
+  } catch (error) {
+    console.error('Withdrawal error:', error);
+    updateState(setWithdrawSubmitError(state, extractErrorMessage(error)));
+  }
+}
+
+/**
+ * Check whether a withdrawal document for this identity appeared on the
+ * network after `sinceMs`. Used to disambiguate submission errors: an error
+ * thrown after broadcast leaves a document behind even though the SDK call
+ * failed. A few short attempts cover processing lag; lookup failures count
+ * as "not found" (the failure screen already warns about the ambiguity).
+ */
+async function didWithdrawalLand(identityId: string, sinceMs: number): Promise<boolean> {
+  const { fetchLatestWithdrawalStatus } = await loadPlatformModule();
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await delay(5_000);
+    try {
+      const record = await fetchLatestWithdrawalStatus(identityId, state.network, sinceMs);
+      if (record !== null) return true;
+    } catch (error) {
+      console.warn('Withdrawal landed-check failed:', error);
+    }
+  }
+  return false;
+}
+
+/**
+ * Poll the withdrawals contract for the payout status until it completes,
+ * the user leaves the tracking step, or the timeout elapses. Poll failures are
+ * informational only — the credits already left the identity, so a failure to
+ * *observe* the payout must never be presented as a failed withdrawal.
+ */
+async function pollWithdrawalStatus(identityId: string, sinceMs: number) {
+  const deadline = Date.now() + WITHDRAW_POLL_TIMEOUT_MS;
+  let consecutiveFailures = 0;
+  let warningShown = false;
+
+  while (state.step === 'withdraw_tracking') {
+    if (Date.now() > deadline) {
+      updateState(setWithdrawTrackingTimeout(
+        state,
+        'The withdrawal was accepted and is still being processed by the network. During heavy volume (daily withdrawal limit) payouts can stay queued for a while — check your Core wallet later.'
+      ));
+      return;
+    }
+
+    await delay(WITHDRAW_POLL_INTERVAL_MS);
+    if (state.step !== 'withdraw_tracking') return;
+
+    try {
+      const { fetchLatestWithdrawalStatus } = await loadPlatformModule();
+      const record = await fetchLatestWithdrawalStatus(identityId, state.network, sinceMs);
+      consecutiveFailures = 0;
+      if (record !== null && record.status !== state.withdrawStatus) {
+        // Also clears any transient polling warning
+        updateState(setWithdrawStatusUpdate(state, record.status));
+        warningShown = false;
+      } else if (warningShown && state.step === 'withdraw_tracking') {
+        updateState(setWithdrawStatusNote(state, undefined));
+        warningShown = false;
+      }
+    } catch (error) {
+      consecutiveFailures++;
+      console.warn('Withdrawal status poll failed:', error);
+      if (consecutiveFailures === WITHDRAW_POLL_FAILURE_WARNING_THRESHOLD && state.step === 'withdraw_tracking') {
+        updateState(setWithdrawStatusNote(
+          state,
+          'Having trouble checking the payout status — the withdrawal itself was accepted and continues processing.'
+        ));
+        warningShown = true;
+      }
+    }
   }
 }
 
