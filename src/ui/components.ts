@@ -2330,7 +2330,7 @@ function renderWithdrawEnterIdentityStep(state: BridgeState): HTMLElement {
 
   form.innerHTML = `
     <div class="input-group">
-      <label class="input-label">Identity ID</label>
+      <label class="input-label" for="withdraw-identity-id-input">Identity ID</label>
       <input
         type="text"
         id="withdraw-identity-id-input"
@@ -2405,20 +2405,19 @@ function renderWithdrawConfigureStep(state: BridgeState): HTMLElement {
   form.className = 'manage-identity-form';
   form.innerHTML = `
     <div class="input-group">
-      <label class="input-label">Transfer Private Key (WIF)</label>
+      <label class="input-label" for="withdraw-private-key-input">Transfer Private Key (WIF)</label>
       <input
         type="password"
         id="withdraw-private-key-input"
         class="manage-input"
         placeholder="Your TRANSFER private key in WIF format..."
-        value="${escapeAttr(state.withdrawPrivateKeyWif || '')}"
       />
       <p class="input-hint">Withdrawals must be signed with a TRANSFER key. Identities created by this bridge have it at HD index 3.</p>
       ${keyValidationHtml}
     </div>
 
     <div class="input-group">
-      <label class="input-label">Destination Dash Address</label>
+      <label class="input-label" for="withdraw-address-input">Destination Dash Address</label>
       <input
         type="text"
         id="withdraw-address-input"
@@ -2431,7 +2430,7 @@ function renderWithdrawConfigureStep(state: BridgeState): HTMLElement {
     </div>
 
     <div class="input-group">
-      <label class="input-label">Amount (DASH)</label>
+      <label class="input-label" for="withdraw-amount-input">Amount (DASH)</label>
       <div class="withdraw-amount-row">
         <input
           type="text"

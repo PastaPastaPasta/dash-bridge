@@ -147,9 +147,10 @@ test.describe('Deterministic UI E2E (mock mode)', () => {
     // Submit walks the mock status sequence to completion
     await page.click('#withdraw-submit-btn');
     await expect(page.getByText('Withdrawal Complete!')).toBeVisible();
-    await expect(page.getByText('0.1 DASH')).toBeVisible();
-    await expect(page.getByText(E2E_MOCK_WITHDRAW_ADDRESS)).toBeVisible();
-    await expect(page.getByText('0.15 DASH')).toBeVisible(); // remaining balance
+    const details = page.locator('.withdraw-success-details');
+    await expect(details).toContainText('Amount: 0.1 DASH');
+    await expect(details).toContainText(E2E_MOCK_WITHDRAW_ADDRESS);
+    await expect(details).toContainText('Remaining balance: 0.15 DASH');
   });
 
   test('standalone DPNS flow validates identity + key and completes registration', async ({ page }) => {

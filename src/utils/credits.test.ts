@@ -119,6 +119,15 @@ describe('validateWithdrawalAmount', () => {
     expect('error' in result && result.error).toContain('exceeds your balance');
   });
 
+  it('reports a too-small balance instead of a negative maximum', () => {
+    // Balance above the withdrawal minimum but below the fee reserve:
+    // the amount passes the balance check but no maximum is withdrawable.
+    const dustBalance = 2_000_000n; // 0.00002 DASH, reserve is 50M
+    const result = validateWithdrawalAmount('0.00001', dustBalance);
+    expect('error' in result && result.error).toContain('too small');
+    expect('error' in result && result.error).not.toContain('-');
+  });
+
   it('rejects amounts inside the fee-reserve headroom', () => {
     // Between balance - reserve and balance: passes the plain balance check
     // but not the fee-reserve check.

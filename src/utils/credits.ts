@@ -95,9 +95,13 @@ export function validateWithdrawalAmount(
   if (credits > balanceCredits) {
     return { error: `Amount exceeds your balance of ${formatCreditsAsDash(balanceCredits)} DASH` };
   }
-  if (credits > maxWithdrawableCredits(balanceCredits)) {
+  const max = maxWithdrawableCredits(balanceCredits);
+  if (credits > max) {
+    if (max < MIN_WITHDRAWAL_CREDITS) {
+      return { error: 'Balance is too small to cover the withdrawal minimum plus the Platform transition fee' };
+    }
     return {
-      error: `Amount is too close to your full balance to cover the Platform transition fee. Maximum: ${formatCreditsAsDash(maxWithdrawableCredits(balanceCredits))} DASH`,
+      error: `Amount is too close to your full balance to cover the Platform transition fee. Maximum: ${formatCreditsAsDash(max)} DASH`,
     };
   }
   return { credits };

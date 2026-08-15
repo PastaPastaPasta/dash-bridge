@@ -132,6 +132,19 @@ export async function withConnectedPlatformSdk<T>(
   }
 }
 
+/**
+ * Thrown when a platform operation exceeds its wall-clock guard. Callers that
+ * must distinguish "timed out (outcome unknown)" from "failed" — e.g. credit
+ * withdrawals, where a false failure invites a double spend — check for this
+ * type instead of matching the message text.
+ */
+export class PlatformOperationTimeoutError extends Error {
+  constructor(action: string) {
+    super(`Timed out while ${action}`);
+    this.name = 'PlatformOperationTimeoutError';
+  }
+}
+
 export async function withPlatformOperationTimeout<T>(
   promise: Promise<T>,
   action: string,
@@ -144,7 +157,7 @@ export async function withPlatformOperationTimeout<T>(
       promise,
       new Promise<never>((_, reject) => {
         timeoutId = window.setTimeout(() => {
-          reject(new Error(`Timed out while ${action}`));
+          reject(new PlatformOperationTimeoutError(action));
         }, timeoutMs);
       }),
     ]);

@@ -129,6 +129,13 @@ describe('withdraw mode state transitions', () => {
     expect(submitted.withdrawResult).toEqual({ success: true, remainingBalance: 42n });
   });
 
+  it('ambiguous timeout enters tracking without a remaining balance, still a success', () => {
+    const submitted = setWithdrawSubmitted(setWithdrawSubmitting(baseState()));
+    expect(submitted.step).toBe('withdraw_tracking');
+    expect(submitted.withdrawStatus).toBe(0);
+    expect(submitted.withdrawResult).toEqual({ success: true, remainingBalance: undefined });
+  });
+
   it('submit error terminates with a failed result', () => {
     const result = setWithdrawSubmitError(setWithdrawSubmitting(baseState()), 'boom');
     expect(result.step).toBe('withdraw_complete');

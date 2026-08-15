@@ -3,6 +3,7 @@ import { extractErrorMessage } from '../utils/errors.js';
 import { loadSdkModule } from './sdkModule.js';
 import {
   PLATFORM_PUT_SETTINGS,
+  PlatformOperationTimeoutError,
   fetchIdentityWithSdk,
   withConnectedPlatformSdk,
   withPlatformOperationTimeout,
@@ -66,18 +67,20 @@ export async function withdrawCredits(
       const signer = new IdentitySigner();
       signer.addKeyFromWif(privateKeyWif);
 
+      // Deliberately single-submit: no retry wrapper and no SDK-level retries.
+      // A retry after an ambiguous network error would rebuild the transition
+      // with a fresh nonce and could withdraw a second time if the first
+      // attempt actually landed. Ambiguous outcomes surface as timedOut and
+      // are resolved by the caller via status tracking instead.
       const remainingBalance = await withPlatformOperationTimeout(
-        withRetry(
-          () => sdk.identities.creditWithdrawal({
-            identity,
-            amount: amountCredits,
-            toAddress,
-            coreFeePerByte: 1,
-            signer,
-            settings: PLATFORM_PUT_SETTINGS,
-          }),
-          retryOptions
-        ),
+        sdk.identities.creditWithdrawal({
+          identity,
+          amount: amountCredits,
+          toAddress,
+          coreFeePerByte: 1,
+          signer,
+          settings: { ...PLATFORM_PUT_SETTINGS, retries: 0 },
+        }),
         'waiting for credit withdrawal confirmation',
         WITHDRAWAL_OPERATION_TIMEOUT_MS
       );
@@ -87,11 +90,10 @@ export async function withdrawCredits(
       return { success: true, remainingBalance };
     } catch (error) {
       console.error('Credit withdrawal error:', error);
-      const errorMessage = extractErrorMessage(error);
       return {
         success: false,
-        error: errorMessage,
-        timedOut: errorMessage.startsWith('Timed out while'),
+        error: extractErrorMessage(error),
+        timedOut: error instanceof PlatformOperationTimeoutError,
       };
     }
   }, retryOptions);

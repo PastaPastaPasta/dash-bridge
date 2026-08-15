@@ -1620,6 +1620,12 @@ function setupEventListeners(container: HTMLElement) {
       return;
     }
 
+    // Skip if this identity is already fetched — refetching would clear a
+    // validated TRANSFER key and repeat two network calls for no change.
+    if (state.targetIdentityId === identityId && state.withdrawIdentityKeys) {
+      return;
+    }
+
     if (!validateIdentityId(identityId)) {
       updateState(setWithdrawIdentityFetchError(state, 'Invalid identity ID format (expected 44 character Base58 string)'));
       return;
@@ -1649,8 +1655,13 @@ function setupEventListeners(container: HTMLElement) {
   onBlurOrPaste('#withdraw-private-key-input', (input) => {
     const privateKeyWif = input.value.trim();
 
+    // The WIF is deliberately never rendered back into the DOM, so the field
+    // is blank after every re-render. An empty blur is a no-op (a validated
+    // key stays validated); entering a new key replaces the old one.
     if (!privateKeyWif) {
-      updateState(clearWithdrawKeyValidation(state));
+      if (!state.withdrawSigningKeyInfo && state.withdrawKeyValidationError) {
+        updateState(clearWithdrawKeyValidation(state));
+      }
       return;
     }
 
