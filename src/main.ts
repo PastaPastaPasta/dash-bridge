@@ -3214,6 +3214,18 @@ async function startWithdrawal() {
     }
 
     if (!result.success || result.remainingBalance === undefined) {
+      // A non-timeout error can still have occurred AFTER broadcast (e.g.
+      // while waiting for the state transition result). Before offering a
+      // retryable failure screen, check whether the withdrawal actually
+      // landed — a second submission would withdraw twice.
+      if (await didWithdrawalLand(identityId, sinceMs)) {
+        updateState(setWithdrawStatusNote(
+          setWithdrawSubmitted(state),
+          'The submission reported an error, but the withdrawal was found on the network — tracking its payout instead.'
+        ));
+        void pollWithdrawalStatus(identityId, sinceMs);
+        return;
+      }
       updateState(setWithdrawSubmitError(state, result.error || 'Withdrawal failed'));
       return;
     }
@@ -3224,6 +3236,27 @@ async function startWithdrawal() {
     console.error('Withdrawal error:', error);
     updateState(setWithdrawSubmitError(state, extractErrorMessage(error)));
   }
+}
+
+/**
+ * Check whether a withdrawal document for this identity appeared on the
+ * network after `sinceMs`. Used to disambiguate submission errors: an error
+ * thrown after broadcast leaves a document behind even though the SDK call
+ * failed. A few short attempts cover processing lag; lookup failures count
+ * as "not found" (the failure screen already warns about the ambiguity).
+ */
+async function didWithdrawalLand(identityId: string, sinceMs: number): Promise<boolean> {
+  const { fetchLatestWithdrawalStatus } = await loadPlatformModule();
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await delay(5_000);
+    try {
+      const record = await fetchLatestWithdrawalStatus(identityId, state.network, sinceMs);
+      if (record !== null) return true;
+    } catch (error) {
+      console.warn('Withdrawal landed-check failed:', error);
+    }
+  }
+  return false;
 }
 
 /**
