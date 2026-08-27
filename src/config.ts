@@ -60,43 +60,51 @@ export const MAINNET: NetworkConfig = {
   rpcUrl: 'https://rpc.digitalcash.dev',
 };
 
-export const DEVNET_PALOMA: NetworkConfig = {
+export const DEVNET_MOUTAI: NetworkConfig = {
   type: 'devnet',
-  name: 'devnet-paloma',
-  insightApiUrl: 'https://insight.paloma.networks.dash.org/insight-api',
+  name: 'devnet-moutai',
+  insightApiUrl: 'https://insight.moutai.networks.dash.org/insight-api',
   addressPrefix: 140,
   p2shPrefix: 19,
   wifPrefix: 239,
   minFee: 1000,
   dustThreshold: 546,
   platformHrp: 'tdash',
-  // Paloma HP masternodes. The full inventory (dash-network-configs
-  // devnet-paloma.inventory) lists 13, but .86/.87/.196/.207 are currently
-  // dead at the TLS/gRPC layer (connection reset before handshake), so they're
-  // pruned to stop the SDK rotating into them. Restore from the inventory once
-  // those nodes are healthy again.
+  // All 13 HP masternodes from dash-network-configs devnet-moutai.inventory,
+  // in inventory order (hp-masternode-1..13). Every one reported ENABLED with
+  // a successful DAPI version check via the quorum service's /masternodes
+  // endpoint, so none are pruned. Trusted mode discovers addresses from the
+  // quorum context; this list is what the islock DAPI stream and the
+  // network-health indicator dial directly.
   dapiAddresses: [
+    'https://68.67.122.254:1443',
+    'https://68.67.122.207:1443',
+    'https://68.67.122.192:1443',
+    'https://68.67.122.194:1443',
+    'https://68.67.122.195:1443',
+    'https://68.67.122.196:1443',
+    'https://68.67.122.253:1443',
     'https://68.67.122.198:1443',
     'https://68.67.122.199:1443',
-    'https://68.67.122.197:1443',
-    'https://68.67.122.192:1443',
-    'https://68.67.122.85:1443',
-    'https://68.67.122.88:1443',
+    'https://68.67.122.84:1443',
     'https://68.67.122.206:1443',
-    'https://68.67.122.193:1443',
-    'https://68.67.122.195:1443',
+    'https://68.67.122.252:1443',
+    'https://68.67.122.197:1443',
   ],
-  faucetBaseUrl: 'https://faucet.paloma.networks.dash.org',
+  // No faucetBaseUrl: moutai's faucet.moutai.networks.dash.org is the legacy
+  // PHP MultiFaucet (reCAPTCHA), which serves no /api/status, so wiring it up
+  // would render an in-app faucet button that only ever 404s. Fund the deposit
+  // address from that page by hand instead.
   useTrustedContext: true,
   // No explicit trustedQuorumUrl — the SDK's default for a devnet named
-  // `paloma` resolves to `https://quorums.paloma.networks.dash.org/quorums`,
-  // which is the deployed endpoint.
+  // `moutai` resolves to `https://quorums.moutai.networks.dash.org/quorums`,
+  // which is deployed and also serves /masternodes and /previous.
 };
 
 const NETWORK_REGISTRY = new Map<string, NetworkConfig>([
   ['testnet', TESTNET],
   ['mainnet', MAINNET],
-  ['devnet-paloma', DEVNET_PALOMA],
+  ['devnet-moutai', DEVNET_MOUTAI],
 ]);
 
 const CUSTOM_DEVNETS_KEY = 'bridge-custom-devnets';

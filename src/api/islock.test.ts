@@ -67,7 +67,7 @@ describe('IslockService', () => {
     const bytes = new Uint8Array([9, 8, 7]);
     const subHandle = { wait: vi.fn().mockResolvedValue(bytes) };
     mocks.subscribeForInstantSendLock.mockResolvedValue(subHandle);
-    const service = new IslockService({ network: 'devnet-paloma', dapiAddresses: ['https://127.0.0.1:1443'] });
+    const service = new IslockService({ network: 'devnet-moutai', dapiAddresses: ['https://127.0.0.1:1443'] });
 
     const handle = await service.subscribeForInstantSendLock(
       'txid',
