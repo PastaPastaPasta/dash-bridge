@@ -429,10 +429,6 @@ function renderInitStep(state: BridgeState): HTMLElement {
       <span class="mode-label">Create New Identity</span>
       <span class="mode-desc">Generate keys and register a new identity</span>
     </button>
-    <button id="mode-topup-btn" class="mode-btn secondary-btn">
-      <span class="mode-label">Top Up Existing Identity</span>
-      <span class="mode-desc">Add credits to an identity you already own</span>
-    </button>
     <button id="mode-send-to-address-btn" class="mode-btn secondary-btn">
       <span class="mode-label">Send to Platform Address</span>
       <span class="mode-desc">Send DASH to any Platform address</span>
@@ -442,16 +438,12 @@ function renderInitStep(state: BridgeState): HTMLElement {
       <span class="mode-desc">Get a DPNS username for your identity</span>
     </button>
     <button id="mode-manage-btn" class="mode-btn secondary-btn">
-      <span class="mode-label">Manage Identity Keys</span>
-      <span class="mode-desc">Add or disable keys on an existing identity</span>
+      <span class="mode-label">Manage Identity</span>
+      <span class="mode-desc">Top up, manage keys, transfer a username, or withdraw credits</span>
     </button>
     <button id="mode-contract-btn" class="mode-btn secondary-btn">
       <span class="mode-label">Register Data Contract</span>
       <span class="mode-desc">Publish a data contract on Dash Platform</span>
-    </button>
-    <button id="mode-withdraw-btn" class="mode-btn secondary-btn">
-      <span class="mode-label">Withdraw Credits</span>
-      <span class="mode-desc">Send Platform credits back to a Dash Core address</span>
     </button>
   `;
   div.appendChild(modeButtons);
@@ -2704,19 +2696,27 @@ function renderManageChooseActionStep(_state: BridgeState): HTMLElement {
 
   const subtitle = document.createElement('p');
   subtitle.className = 'manage-subtitle';
-  subtitle.textContent = 'Change the keys on an identity, or move a username to another identity.';
+  subtitle.textContent = 'Everything that acts on an identity you already own.';
   div.appendChild(subtitle);
 
   const choiceButtons = document.createElement('div');
   choiceButtons.className = 'manage-choice-buttons';
   choiceButtons.innerHTML = `
-    <button id="manage-action-keys-btn" class="mode-btn primary-btn">
+    <button id="manage-action-topup-btn" class="mode-btn primary-btn">
+      <span class="mode-label">Top Up Identity</span>
+      <span class="mode-desc">Add credits to an identity you already own</span>
+    </button>
+    <button id="manage-action-keys-btn" class="mode-btn secondary-btn">
       <span class="mode-label">Manage Keys</span>
       <span class="mode-desc">Add or disable keys on an identity you own</span>
     </button>
     <button id="manage-action-transfer-btn" class="mode-btn secondary-btn">
       <span class="mode-label">Transfer a Username</span>
       <span class="mode-desc">Move a DPNS username to another identity</span>
+    </button>
+    <button id="manage-action-withdraw-btn" class="mode-btn secondary-btn">
+      <span class="mode-label">Withdraw Credits</span>
+      <span class="mode-desc">Send Platform credits back to a Dash Core address</span>
     </button>
   `;
   div.appendChild(choiceButtons);

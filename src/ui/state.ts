@@ -259,6 +259,9 @@ function clearModeSensitiveFields(state: BridgeState, mode: BridgeMode): BridgeS
     // is the user's real wallet seed, so it must not outlive the flow that
     // asked for it.
     ...clearUsernameTransferFields(state),
+    // Re-entering a mode from the init screen or a deep link means we did not
+    // come through the Manage Identity menu; the chooser re-sets this itself.
+    fromManageMenu: undefined,
     recipientPlatformAddress: mode === 'send_to_address' ? state.recipientPlatformAddress : undefined,
     withdrawPrivateKeyWif: undefined,
     withdrawSigningKeyInfo: undefined,
@@ -1355,6 +1358,21 @@ export function setManageActionTransfer(state: BridgeState): BridgeState {
     step: 'xfer_credentials',
     targetIdentityId: undefined,
   };
+}
+
+/**
+ * Manage mode: choose top-up. Unlike keys and transfer this is its own mode, so
+ * it goes through setMode and then records that the menu was the entry point.
+ */
+export function setManageActionTopUp(state: BridgeState): BridgeState {
+  return { ...setMode(state, 'topup'), fromManageMenu: true };
+}
+
+/**
+ * Manage mode: choose credit withdrawal. Also its own mode.
+ */
+export function setManageActionWithdraw(state: BridgeState): BridgeState {
+  return { ...setMode(state, 'withdraw'), fromManageMenu: true };
 }
 
 /**

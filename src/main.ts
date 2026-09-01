@@ -85,6 +85,8 @@ import {
   setManageBackToEntry,
   setManageActionKeys,
   setManageActionTransfer,
+  setManageActionTopUp,
+  setManageActionWithdraw,
   // Username transfer state functions
   setXferCredentialSource,
   setXferMnemonic,
@@ -683,14 +685,6 @@ function setupEventListeners(container: HTMLElement) {
     });
   }
 
-  const modeTopUpBtn = container.querySelector('#mode-topup-btn');
-  attachDashWarmup(modeTopUpBtn);
-  if (modeTopUpBtn) {
-    modeTopUpBtn.addEventListener('click', () => {
-      updateState(setMode(state, 'topup'));
-    });
-  }
-
   // Platform Address mode button (init page)
   const modeSendToAddressBtn = container.querySelector('#mode-send-to-address-btn');
   attachDashWarmup(modeSendToAddressBtn);
@@ -707,6 +701,10 @@ function setupEventListeners(container: HTMLElement) {
       if (state.contractFromIdentityCreation) {
         // Return to contract review instead of init
         updateState({ ...state, mode: 'contract', step: 'contract_review' });
+      } else if (state.fromManageMenu) {
+        // Opened from the Manage Identity menu, so go back to it rather than
+        // all the way out. setMode('manage') is the menu.
+        updateState(setMode(state, 'manage'));
       } else {
         updateState(setStep(state, 'init'));
       }
@@ -1192,6 +1190,22 @@ function setupEventListeners(container: HTMLElement) {
   }
 
   // Manage action chooser (keys vs username transfer)
+  const manageActionTopUpBtn = container.querySelector('#manage-action-topup-btn');
+  attachDashWarmup(manageActionTopUpBtn);
+  if (manageActionTopUpBtn) {
+    manageActionTopUpBtn.addEventListener('click', () => {
+      updateState(setManageActionTopUp(state));
+    });
+  }
+
+  const manageActionWithdrawBtn = container.querySelector('#manage-action-withdraw-btn');
+  attachDashWarmup(manageActionWithdrawBtn);
+  if (manageActionWithdrawBtn) {
+    manageActionWithdrawBtn.addEventListener('click', () => {
+      updateState(setManageActionWithdraw(state));
+    });
+  }
+
   const manageActionKeysBtn = container.querySelector('#manage-action-keys-btn');
   if (manageActionKeysBtn) {
     manageActionKeysBtn.addEventListener('click', () => {
@@ -1818,14 +1832,6 @@ function setupEventListeners(container: HTMLElement) {
   }, 'TRANSFER');
 
   // Withdraw mode button (init page)
-  const modeWithdrawBtn = container.querySelector('#mode-withdraw-btn');
-  attachDashWarmup(modeWithdrawBtn);
-  if (modeWithdrawBtn) {
-    modeWithdrawBtn.addEventListener('click', () => {
-      updateState(setMode(state, 'withdraw'));
-    });
-  }
-
   // Withdraw back button (enter identity / configure steps)
   const withdrawBackBtn = container.querySelector('#withdraw-back-btn');
   if (withdrawBackBtn) {
@@ -1835,7 +1841,9 @@ function setupEventListeners(container: HTMLElement) {
           updateState(setWithdrawBackToEntry(state));
           break;
         default:
-          updateState(setStep(state, 'init'));
+          // ?mode=withdraw deep-links straight here, so only return to the
+          // Manage Identity menu when that is where we came from.
+          updateState(state.fromManageMenu ? setMode(state, 'manage') : setStep(state, 'init'));
       }
     });
   }

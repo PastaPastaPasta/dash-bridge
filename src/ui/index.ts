@@ -70,6 +70,8 @@ export {
   setManageBackToEntry,
   setManageActionKeys,
   setManageActionTransfer,
+  setManageActionTopUp,
+  setManageActionWithdraw,
   // Username transfer state functions
   setXferCredentialSource,
   setXferMnemonic,

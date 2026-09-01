@@ -388,6 +388,12 @@ export interface BridgeState {
   manageUpdateResult?: { success: boolean; error?: string };
   /** Manage: key validation error message */
   manageKeyValidationError?: string;
+  /**
+   * Whether the current flow was entered from the Manage Identity menu rather
+   * than from the init screen or a deep link. Drives where Back returns to,
+   * since top-up and withdraw are reachable both ways.
+   */
+  fromManageMenu?: boolean;
 
   // Username transfer fields
   /** Transfer: how the user supplied credentials */

@@ -51,7 +51,8 @@ test.describe('Deterministic UI E2E (mock mode)', () => {
   test('top up flow validates identity input and reaches completion', async ({ page }) => {
     await page.goto(MOCK_QUERY);
 
-    await page.click('#mode-topup-btn');
+    await page.click('#mode-manage-btn');
+    await page.click('#manage-action-topup-btn');
     await expect(page.locator('#identity-id-input')).toBeVisible();
 
     await page.click('#continue-topup-btn');
@@ -68,6 +69,44 @@ test.describe('Deterministic UI E2E (mock mode)', () => {
 
     await expect(page.getByText('Top-up complete!')).toBeVisible();
     await expect(page.locator('.contract-id-section', { hasText: 'Identity ID' }).locator('.identity-id')).toHaveText(E2E_MOCK_IDENTITY_ID);
+  });
+
+  test('manage identity menu gathers the identity operations and Back returns to it', async ({ page }) => {
+    await page.goto(MOCK_QUERY);
+
+    // The init screen no longer carries these as separate entries.
+    await expect(page.locator('#mode-topup-btn')).toHaveCount(0);
+    await expect(page.locator('#mode-withdraw-btn')).toHaveCount(0);
+
+    await page.click('#mode-manage-btn');
+    for (const id of ['topup', 'keys', 'transfer', 'withdraw']) {
+      await expect(page.locator(`#manage-action-${id}-btn`)).toBeVisible();
+    }
+
+    // Back out of top-up returns to the menu, not the init screen.
+    await page.click('#manage-action-topup-btn');
+    await expect(page.locator('#identity-id-input')).toBeVisible();
+    await page.click('#back-btn');
+    await expect(page.locator('#manage-action-topup-btn')).toBeVisible();
+
+    // Same for withdraw, which has its own back button.
+    await page.click('#manage-action-withdraw-btn');
+    await expect(page.locator('#withdraw-identity-id-input')).toBeVisible();
+    await page.click('#withdraw-back-btn');
+    await expect(page.locator('#manage-action-withdraw-btn')).toBeVisible();
+
+    // And Back from the menu itself leaves for the init screen.
+    await page.click('#back-btn');
+    await expect(page.locator('#mode-create-btn')).toBeVisible();
+  });
+
+  test('deep-linked withdraw goes back to init, not the manage menu', async ({ page }) => {
+    await page.goto('/?network=testnet&e2e=mock&mode=withdraw');
+    await expect(page.locator('#withdraw-identity-id-input')).toBeVisible();
+
+    await page.click('#withdraw-back-btn');
+    await expect(page.locator('#mode-create-btn')).toBeVisible();
+    await expect(page.locator('#manage-action-withdraw-btn')).toHaveCount(0);
   });
 
   test('manage identity flow validates key and applies changes', async ({ page }) => {
@@ -102,7 +141,8 @@ test.describe('Deterministic UI E2E (mock mode)', () => {
   test('withdraw flow validates inputs and completes with status tracking', async ({ page }) => {
     await page.goto(MOCK_QUERY);
 
-    await page.click('#mode-withdraw-btn');
+    await page.click('#mode-manage-btn');
+    await page.click('#manage-action-withdraw-btn');
     await expect(page.locator('#withdraw-identity-id-input')).toBeVisible();
 
     // Invalid identity ID is rejected
