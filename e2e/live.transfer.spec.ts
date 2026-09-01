@@ -7,9 +7,11 @@ import { expect, test } from '@playwright/test';
  * transitions and spend testnet credits, so they are skipped by default and are
  * not part of `npm run test:e2e`.
  *
- * Stage 1 creates a destination identity through the bridge's own create mode,
- * funded by the built-in testnet faucet.
- * Stage 2 transfers a username to it and verifies the result on-chain.
+ * Each stage opts in separately so that enabling the suite never provisions or
+ * spends anything on its own:
+ *   PW_XFER_PROVISION=1                        create a destination identity
+ *   PW_XFER_TOPUP=<identityId>                 add credits to an identity
+ *   PW_XFER_SEED / _RECIPIENT / _USERNAME      the transfer itself
  */
 const LIVE = process.env.PW_LIVE_XFER === '1';
 const LIVE_URL = '/?network=testnet';
@@ -19,6 +21,9 @@ test.describe('Live testnet username transfer', () => {
 
   test('create a destination identity via the faucet', async ({ page }) => {
     test.setTimeout(15 * 60_000);
+    // Opt in separately: this spends faucet funds, so enabling the suite alone
+    // must not provision anything.
+    test.skip(process.env.PW_XFER_PROVISION !== '1', 'set PW_XFER_PROVISION=1 to run');
 
     await page.goto(LIVE_URL);
     await page.click('#mode-create-btn');
@@ -26,7 +31,6 @@ test.describe('Live testnet username transfer', () => {
 
     await expect(page.locator('.deposit-headline')).toBeVisible({ timeout: 60_000 });
 
-    // Capture the mnemonic so the identity is reusable after the run.
     const depositAddress = await page.locator('.deposit-address, .address-value, code').first().innerText();
     console.log('DEPOSIT ADDRESS:', depositAddress.trim());
 
@@ -40,13 +44,10 @@ test.describe('Live testnet username transfer', () => {
       .locator('.contract-id-section', { hasText: 'Your Identity ID' })
       .locator('.identity-id')
       .innerText();
-    // Best-effort: the recovery phrase may sit behind a reveal control, in
-    // which case this logs nothing and the identity is single-use.
-    const words = await page.locator('.mnemonic-word').allInnerTexts();
-    const phrase = words.map((w) => w.replace(/^\s*\d+\.\s*/, '').trim()).join(' ');
-
+    // The recovery phrase is deliberately NOT logged — runner logs are not a
+    // place for seed phrases, even testnet ones. Read it off the completion
+    // screen by hand if you want a reusable destination identity.
     console.log('DESTINATION IDENTITY:', identityId.trim());
-    console.log('DESTINATION MNEMONIC:', phrase || '(not captured — reveal it in the UI to reuse)');
     expect(identityId.trim().length).toBeGreaterThan(40);
   });
 
