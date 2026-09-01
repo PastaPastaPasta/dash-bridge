@@ -85,27 +85,42 @@ export async function discoverIdentitiesFromCandidates(
   return withConnectedPlatformSdk(
     network,
     async (sdk) => {
+      // Scanning every candidate rather than stopping at the first hit means a
+      // fixed cost per unlock, so the lookups run a few at a time instead of
+      // one after another. The cap keeps this from opening a burst of
+      // connections against DAPI.
+      const CONCURRENCY = 4;
+      const results = new Array<Awaited<ReturnType<typeof findIdentityIdByPublicKeyHash>>>(
+        candidates.length
+      );
+      let checked = 0;
+
+      for (let start = 0; start < candidates.length; start += CONCURRENCY) {
+        const batch = candidates.slice(start, start + CONCURRENCY);
+        await Promise.all(
+          batch.map(async (candidate, offset) => {
+            results[start + offset] = await findIdentityIdByPublicKeyHash(sdk, candidate.publicKeyHash);
+            onProgress?.(++checked, candidates.length);
+          })
+        );
+      }
+
+      // Fold in candidate order so the identity reached by the earliest
+      // derivation path wins, regardless of which lookup resolved first.
       const found: DiscoveredIdentity[] = [];
       const seen = new Set<string>();
       let anyAnswered = false;
       let lastError: unknown;
 
-      for (let i = 0; i < candidates.length; i++) {
-        const candidate = candidates[i];
-        onProgress?.(i + 1, candidates.length);
-
-        const result = await findIdentityIdByPublicKeyHash(sdk, candidate.publicKeyHash);
+      for (let k = 0; k < candidates.length; k++) {
+        const result = results[k];
         if (result.identityId) {
           anyAnswered = true;
-          // Several derived keys belong to the same identity; keep the first
-          // candidate that reached it.
           if (!seen.has(result.identityId)) {
             seen.add(result.identityId);
-            found.push({ identityId: result.identityId, candidate });
+            found.push({ identityId: result.identityId, candidate: candidates[k] });
           }
-          continue;
-        }
-        if (result.error === undefined) {
+        } else if (result.error === undefined) {
           anyAnswered = true;
         } else {
           lastError = result.error;
