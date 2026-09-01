@@ -131,6 +131,17 @@ export interface IdentityPublicKeyInfo {
 export type UsernameTransferCredentialSource = 'seed' | 'key';
 
 /**
+ * A username an identity owns, paired with the DPNS document that backs it.
+ * The document id is carried so the transfer never has to resolve a display
+ * name back to a document.
+ */
+export interface OwnedUsername {
+  username: string;
+  documentId: string;
+  ownerId: string;
+}
+
+/**
  * Outcome of a username transfer attempt.
  */
 export interface UsernameTransferOutcome {
@@ -413,7 +424,9 @@ export interface BridgeState {
   /** Transfer: validated signing key */
   xferSigningKeyInfo?: { keyId: number; securityLevel: number };
   /** Transfer: usernames owned by the source identity */
-  xferOwnedUsernames?: string[];
+  xferOwnedUsernames?: OwnedUsername[];
+  /** Transfer: other identities the seed controls, if it found more than one */
+  xferOtherIdentities?: string[];
   /** Transfer: the username selected for transfer */
   xferSelectedUsername?: string;
   /** Transfer: destination identity ID */

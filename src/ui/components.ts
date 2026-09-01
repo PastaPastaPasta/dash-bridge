@@ -2891,10 +2891,19 @@ function renderXferSelectUsernameStep(state: BridgeState): HTMLElement {
   list.className = 'xfer-username-list';
 
   if (usernames.length === 0) {
-    list.innerHTML = `<p class="input-hint">This identity does not own any usernames.</p>`;
+    const others = state.xferOtherIdentities?.length ?? 0;
+    list.innerHTML = `
+      <div class="warning-box">
+        <p><strong>This identity does not own any usernames.</strong></p>
+        <p>There is nothing to transfer from it.${
+          others > 0
+            ? ` Your seed also controls ${others} other ${others === 1 ? 'identity' : 'identities'}, none of which own a name either.`
+            : ''
+        } Go back to pick a different identity, or register a username for this one first.</p>
+      </div>`;
   } else {
     list.innerHTML = usernames
-      .map((username) => `
+      .map(({ username }) => `
         <label class="xfer-username-option">
           <input
             type="radio"

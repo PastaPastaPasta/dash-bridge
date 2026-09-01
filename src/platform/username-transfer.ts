@@ -11,7 +11,7 @@ import {
 import { extractErrorMessage } from '../utils/errors.js';
 import { loadSdkModule } from './sdkModule.js';
 import type { DerivedCandidateKey } from './username-transfer-utils.js';
-import type { UsernameTransferOutcome } from '../types.js';
+import type { OwnedUsername, UsernameTransferOutcome } from '../types.js';
 
 /**
  * DPNS is a system data contract with the same ID on every network.
@@ -67,22 +67,26 @@ async function findIdentityIdByPublicKeyHash(
 }
 
 /**
- * Walk derived candidates in order and return the first one that resolves to a
- * registered identity. Candidates are pre-ordered cheapest-first, so this
- * usually resolves on the first or second lookup.
+ * Find every identity the seed controls, in candidate order.
+ *
+ * This deliberately scans all candidates rather than stopping at the first hit:
+ * one seed routinely controls several identities, and the first one found is
+ * not necessarily the one holding the username the user wants to move.
  *
  * Throws if no lookup ever completed, so an unreachable network is not reported
  * to the user as an unrecognised seed phrase.
  */
-export async function discoverIdentityFromCandidates(
+export async function discoverIdentitiesFromCandidates(
   candidates: DerivedCandidateKey[],
   network: string,
   onProgress?: (checked: number, total: number) => void,
   retryOptions?: RetryOptions
-): Promise<DiscoveredIdentity | undefined> {
+): Promise<DiscoveredIdentity[]> {
   return withConnectedPlatformSdk(
     network,
     async (sdk) => {
+      const found: DiscoveredIdentity[] = [];
+      const seen = new Set<string>();
       let anyAnswered = false;
       let lastError: unknown;
 
@@ -92,7 +96,14 @@ export async function discoverIdentityFromCandidates(
 
         const result = await findIdentityIdByPublicKeyHash(sdk, candidate.publicKeyHash);
         if (result.identityId) {
-          return { identityId: result.identityId, candidate };
+          anyAnswered = true;
+          // Several derived keys belong to the same identity; keep the first
+          // candidate that reached it.
+          if (!seen.has(result.identityId)) {
+            seen.add(result.identityId);
+            found.push({ identityId: result.identityId, candidate });
+          }
+          continue;
         }
         if (result.error === undefined) {
           anyAnswered = true;
@@ -101,10 +112,10 @@ export async function discoverIdentityFromCandidates(
         }
       }
 
-      if (!anyAnswered && lastError !== undefined) {
+      if (found.length === 0 && !anyAnswered && lastError !== undefined) {
         throw lastError;
       }
-      return undefined;
+      return found;
     },
     retryOptions
   );
@@ -113,22 +124,43 @@ export async function discoverIdentityFromCandidates(
 /**
  * List the usernames an identity owns.
  *
- * Note this queries by `records.identity`, not `$ownerId` — the two are kept in
- * sync by Platform on transfer, but the caller still re-checks `ownerId` on the
- * document before signing rather than trusting this listing.
+ * Queries by `records.identity` because that is the indexed field — `$ownerId`
+ * is not indexed on the DPNS `domain` type, so Drive rejects a where clause on
+ * it. Platform keeps the two in sync on transfer, and the caller re-checks
+ * `ownerId` on the document before signing regardless.
  */
 export async function listOwnedUsernames(
   identityId: string,
   network: string,
   retryOptions?: RetryOptions
-): Promise<string[]> {
+): Promise<OwnedUsername[]> {
   return withConnectedPlatformSdk(
     network,
-    (sdk) =>
-      withRetry(
-        () => sdk.dpns.usernames({ identityId, limit: USERNAME_LIST_LIMIT }),
+    async (sdk) => {
+      const documents = await withRetry(
+        () => sdk.documents.query({
+          dataContractId: DPNS_CONTRACT_ID,
+          documentTypeName: DPNS_DOCUMENT_TYPE,
+          where: [['records.identity', '==', identityId]],
+          limit: USERNAME_LIST_LIMIT,
+        }),
         retryOptions
-      ),
+      );
+
+      const owned: OwnedUsername[] = [];
+      for (const document of documents.values()) {
+        if (!document) continue;
+        const label = document.properties?.label;
+        const parent = document.properties?.normalizedParentDomainName;
+        if (typeof label !== 'string' || typeof parent !== 'string') continue;
+        owned.push({
+          username: `${label}.${parent}`,
+          documentId: document.id.toString(),
+          ownerId: document.ownerId.toString(),
+        });
+      }
+      return owned;
+    },
     retryOptions
   );
 }
@@ -212,7 +244,10 @@ async function readDomainOwnership(
 }
 
 export interface TransferUsernameParams {
+  /** Display name, used only for messages. */
   username: string;
+  /** The DPNS domain document that backs the name. */
+  documentId: string;
   identityId: string;
   publicKeyId: number;
   privateKeyWif: string;
@@ -230,7 +265,7 @@ export async function transferUsername(
   params: TransferUsernameParams,
   retryOptions?: RetryOptions
 ): Promise<UsernameTransferOutcome> {
-  const { username, identityId, publicKeyId, privateKeyWif, recipientId, network } = params;
+  const { username, documentId, identityId, publicKeyId, privateKeyWif, recipientId, network } = params;
 
   if (identityId === recipientId) {
     return { success: false, error: 'Cannot transfer a username to the identity that already owns it' };
@@ -239,29 +274,19 @@ export async function transferUsername(
   return withConnectedPlatformSdk(
     network,
     async (sdk) => {
-      const info = await withRetry(() => sdk.dpns.getUsernameByName(username), retryOptions);
-      if (!info) {
-        return { success: false, error: `Username "${username}" was not found on ${network}` };
-      }
-
-      const documentId = info.documentId.toString();
-      if (info.identityId.toString() !== identityId) {
-        return {
-          success: false,
-          error: `"${username}" is owned by ${info.identityId.toString()}, not ${identityId}`,
-        };
-      }
-
+      // The document id comes from the listing rather than a name lookup:
+      // dpns.getUsernameByName matches on the homograph-folded normalizedLabel,
+      // so any name containing l, i or o would not resolve from its display form.
       const document = await withRetry(
         () => sdk.documents.get(DPNS_CONTRACT_ID, DPNS_DOCUMENT_TYPE, documentId),
         retryOptions
       );
       if (!document) {
-        return { success: false, error: `Domain document ${documentId} could not be fetched` };
+        return { success: false, error: `The document behind "${username}" could not be fetched` };
       }
 
-      // Re-check ownership on the document itself. `getUsernameByName` reports
-      // the owner, but this is the object we are about to sign over.
+      // Re-check ownership on the document we are about to sign over, rather
+      // than trusting the listing it came from.
       if (document.ownerId.toString() !== identityId) {
         return {
           success: false,

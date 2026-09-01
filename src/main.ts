@@ -189,6 +189,7 @@ import type {
   DpnsUsernameEntry,
   DpnsRegistrationResult,
   IdentityPublicKeyInfo,
+  OwnedUsername,
   E2EMockWindow,
   AssetLockProofData,
 } from './types.js';
@@ -430,8 +431,14 @@ function createE2EMockIdentityKeys(): IdentityPublicKeyInfo[] {
   ];
 }
 
-function createE2EMockOwnedUsernames(): string[] {
-  return ['mockname.dash', 'second-mockname.dash'];
+function createE2EMockOwnedUsernames(): OwnedUsername[] {
+  // Both labels contain "l", which homograph-folds to "1" in normalizedLabel.
+  // Real names like these cannot be resolved from their display form, so the
+  // mock keeps the flow honest about carrying document ids around.
+  return [
+    { username: 'mocklabel.dash', documentId: E2E_MOCK_IDENTITY_ID, ownerId: E2E_MOCK_IDENTITY_ID },
+    { username: 'second-mocklabel.dash', documentId: E2E_MOCK_XFER_RECIPIENT_ID, ownerId: E2E_MOCK_IDENTITY_ID },
+  ];
 }
 
 function createE2EMockDpnsAvailability(entries: DpnsUsernameEntry[]): DpnsUsernameEntry[] {
@@ -3416,7 +3423,7 @@ async function startManageUpdate() {
  * known: the names it owns, and the network's protocol version.
  */
 async function loadTransferContext(identityId: string): Promise<{
-  usernames: string[];
+  usernames: OwnedUsername[];
   protocolVersion?: number;
 }> {
   const { listOwnedUsernames, getProtocolVersion } = await loadUsernameTransferModule();
@@ -3456,16 +3463,16 @@ async function startXferUnlockFromSeed(mnemonic: string) {
 
   const candidates = deriveCandidateKeys(mnemonic, state.network);
 
-  const { discoverIdentityFromCandidates } = await loadUsernameTransferModule();
-  const discovered = await discoverIdentityFromCandidates(
+  const { discoverIdentitiesFromCandidates } = await loadUsernameTransferModule();
+  const discovered = await discoverIdentitiesFromCandidates(
     candidates,
     state.network,
-    (checked, total) => {
-      updateState(setXferDiscoveryStatus(state, `Searching for your identity (${checked}/${total})...`));
+    (checked: number, total: number) => {
+      updateState(setXferDiscoveryStatus(state, `Searching for your identities (${checked}/${total})...`));
     }
   );
 
-  if (!discovered) {
+  if (discovered.length === 0) {
     updateState(setXferCredentialError(
       state,
       'No identity on this network uses a key from that seed phrase. Check you picked the right network, or use the Private Key tab to enter an identity ID directly.'
@@ -3473,14 +3480,59 @@ async function startXferUnlockFromSeed(mnemonic: string) {
     return;
   }
 
-  updateState(setXferDiscoveryStatus(state, 'Identity found. Checking your keys...'));
+  updateState(setXferDiscoveryStatus(
+    state,
+    discovered.length === 1
+      ? 'Identity found. Checking your keys...'
+      : `Found ${discovered.length} identities. Checking which own usernames...`
+  ));
 
-  const keys = await getIdentityPublicKeys(discovered.identityId, state.network);
-  await applyXferKeySelection(
-    discovered.identityId,
-    selectTransferSigningKey(candidates, keys, state.network),
-    'That seed phrase does not control any active key on the identity it points to.'
-  );
+  // A seed commonly controls several identities, and the first one found is not
+  // necessarily the one holding the name. Load each, then prefer one that
+  // actually owns a username.
+  const loaded: {
+    identityId: string;
+    selection: ReturnType<typeof selectTransferSigningKey>;
+    usernames: OwnedUsername[];
+    protocolVersion?: number;
+  }[] = [];
+
+  for (const { identityId } of discovered) {
+    const keys = await getIdentityPublicKeys(identityId, state.network);
+    const selection = selectTransferSigningKey(candidates, keys, state.network);
+    const context = selection.status === 'ok'
+      ? await loadTransferContext(identityId)
+      : { usernames: [] as OwnedUsername[], protocolVersion: undefined };
+    loaded.push({ identityId, selection, ...context });
+  }
+
+  const usable = loaded.filter((entry) => entry.selection.status === 'ok');
+  if (usable.length === 0) {
+    // Report the most informative failure we saw rather than a generic one.
+    const ineligible = loaded.find((entry) => entry.selection.status === 'ineligible');
+    await applyXferKeySelection(
+      loaded[0].identityId,
+      ineligible?.selection ?? loaded[0].selection,
+      'That seed phrase does not control any active key on the identities it points to.'
+    );
+    return;
+  }
+
+  const chosen = usable.find((entry) => entry.usernames.length > 0) ?? usable[0];
+  const selection = chosen.selection;
+  if (selection.status !== 'ok') return; // narrowed by `usable` above
+
+  updateState(setXferIdentityUnlocked(state, {
+    identityId: chosen.identityId,
+    privateKeyWif: selection.candidate.privateKeyWif,
+    keyId: selection.keyId,
+    securityLevel: selection.securityLevel,
+    usernames: chosen.usernames,
+    protocolVersion: chosen.protocolVersion,
+    otherIdentities: usable
+      .filter((entry) => entry.identityId !== chosen.identityId)
+      .map((entry) => entry.identityId),
+  }));
 }
 
 /**
@@ -3700,9 +3752,16 @@ async function startUsernameTransfer() {
       return;
     }
 
+    const selected = (state.xferOwnedUsernames || []).find((u) => u.username === username);
+    if (!selected) {
+      updateState(setXferResult(state, { success: false, error: `"${username}" is no longer in the list of names this identity owns` }));
+      return;
+    }
+
     const { transferUsername } = await loadUsernameTransferModule();
     const result = await transferUsername({
       username,
+      documentId: selected.documentId,
       identityId,
       publicKeyId: keyId,
       privateKeyWif,
