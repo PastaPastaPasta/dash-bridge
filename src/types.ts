@@ -125,6 +125,24 @@ export interface IdentityPublicKeyInfo {
 }
 
 /**
+ * How the user supplied credentials for a username transfer.
+ * 'seed' auto-discovers the identity; 'key' takes an identity ID + WIF.
+ */
+export type UsernameTransferCredentialSource = 'seed' | 'key';
+
+/**
+ * Outcome of a username transfer attempt.
+ */
+export interface UsernameTransferOutcome {
+  success: boolean;
+  error?: string;
+  /** Whether the domain document's owner was confirmed to be the recipient */
+  verifiedOwner?: boolean;
+  /** Whether `records.identity` was rewritten, so the name resolves to the recipient */
+  recordsUpdated?: boolean;
+}
+
+/**
  * Configuration for a new key to add during identity update
  */
 export interface ManageNewKeyConfig {
@@ -174,10 +192,17 @@ export type BridgeStep =
   | 'dpns_registering'        // Registration in progress
   | 'dpns_complete'           // Done
   // Identity Management steps
+  | 'manage_choose_action'    // Choose: manage keys or transfer a username
   | 'manage_enter_identity'   // Enter identity ID + private key WIF
   | 'manage_view_keys'        // Display current keys, configure changes
   | 'manage_updating'         // Update transition in progress
   | 'manage_complete'         // Update complete
+  // Username transfer steps
+  | 'xfer_credentials'        // Enter seed phrase (auto-discovers identity) or identity ID + WIF
+  | 'xfer_select_username'    // Pick an owned username + destination identity ID
+  | 'xfer_review'             // Confirm the irreversible transfer
+  | 'xfer_transferring'       // Document transfer transition in progress
+  | 'xfer_complete'           // Transfer complete
   // Contract registration steps
   | 'contract_choose_identity'  // Choose: create new or use existing
   | 'contract_enter_identity'   // Enter existing identity ID + private key
@@ -356,6 +381,40 @@ export interface BridgeState {
   manageUpdateResult?: { success: boolean; error?: string };
   /** Manage: key validation error message */
   manageKeyValidationError?: string;
+
+  // Username transfer fields
+  /** Transfer: how the user supplied credentials */
+  xferCredentialSource?: UsernameTransferCredentialSource;
+  /** Transfer: raw seed phrase input (kept so the field survives re-render) */
+  xferMnemonic?: string;
+  /** Transfer: identity discovery / lookup in progress */
+  xferDiscovering?: boolean;
+  /** Transfer: progress message shown while discovering or loading usernames */
+  xferDiscoveryStatus?: string;
+  /** Transfer: credential entry error message */
+  xferCredentialError?: string;
+  /** Transfer: WIF for the key that will sign the transfer */
+  xferPrivateKeyWif?: string;
+  /** Transfer: validated signing key */
+  xferSigningKeyInfo?: { keyId: number; securityLevel: number };
+  /** Transfer: usernames owned by the source identity */
+  xferOwnedUsernames?: string[];
+  /** Transfer: the username selected for transfer */
+  xferSelectedUsername?: string;
+  /** Transfer: destination identity ID */
+  xferRecipientId?: string;
+  /** Transfer: recipient validation error message */
+  xferRecipientError?: string;
+  /** Transfer: whether the recipient identity was confirmed to exist */
+  xferRecipientVerified?: boolean;
+  /** Transfer: recipient existence check in progress */
+  xferRecipientChecking?: boolean;
+  /** Transfer: network protocol version (transfers need >= 13) */
+  xferProtocolVersion?: number;
+  /** Transfer: whether the user acknowledged that transfers are irreversible */
+  xferConfirmationAcknowledged?: boolean;
+  /** Transfer: result of the transfer attempt */
+  xferResult?: UsernameTransferOutcome;
 
   // Contract registration fields
   /** Contract: identity source (new or existing) */

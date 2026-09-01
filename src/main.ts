@@ -83,6 +83,26 @@ import {
   resetManageState,
   resetManageStateAndRefresh,
   setManageBackToEntry,
+  setManageActionKeys,
+  setManageActionTransfer,
+  // Username transfer state functions
+  setXferCredentialSource,
+  setXferMnemonic,
+  setXferDiscovering,
+  setXferDiscoveryStatus,
+  setXferCredentialError,
+  setXferIdentityUnlocked,
+  setXferSelectedUsername,
+  setXferRecipientId,
+  setXferRecipientChecking,
+  setXferRecipientVerified,
+  setXferRecipientError,
+  setXferReview,
+  setXferConfirmationAcknowledged,
+  setXferTransferring,
+  setXferResult,
+  setXferBackToCredentials,
+  setXferBackToSelect,
   // Contract registration state functions
   setContractIdentitySource,
   setContractIdentityFetching,
@@ -141,8 +161,20 @@ import {
   loadIslockModule,
   loadPlatformClientModule,
   loadPlatformModule,
+  loadUsernameTransferModule,
   warmDashModules,
 } from './platform/loaders.js';
+import {
+  deriveCandidateKeys,
+  explainKeyIneligibility,
+  isEligibleTransferKey,
+  isProtocolVersionSupported,
+  isValidIdentityId,
+  isValidMnemonic,
+  normalizeMnemonic,
+  selectTransferSigningKey,
+  MIN_TRANSFER_PROTOCOL_VERSION,
+} from './platform/username-transfer-utils.js';
 import { loadSdkModule } from './platform/sdkModule.js';
 import type {
   BridgeState,
@@ -164,6 +196,8 @@ import {
   E2E_MOCK_MANAGE_WIF,
   E2E_MOCK_WITHDRAW_WIF,
   E2E_MOCK_WITHDRAW_BALANCE,
+  E2E_MOCK_XFER_MNEMONIC,
+  E2E_MOCK_XFER_RECIPIENT_ID,
 } from './e2e-mock-constants.js';
 
 // Global state
@@ -391,6 +425,10 @@ function createE2EMockIdentityKeys(): IdentityPublicKeyInfo[] {
       isDisabled: false,
     },
   ];
+}
+
+function createE2EMockOwnedUsernames(): string[] {
+  return ['mockname.dash', 'second-mockname.dash'];
 }
 
 function createE2EMockDpnsAvailability(entries: DpnsUsernameEntry[]): DpnsUsernameEntry[] {
@@ -1152,13 +1190,28 @@ function setupEventListeners(container: HTMLElement) {
     });
   }
 
+  // Manage action chooser (keys vs username transfer)
+  const manageActionKeysBtn = container.querySelector('#manage-action-keys-btn');
+  if (manageActionKeysBtn) {
+    manageActionKeysBtn.addEventListener('click', () => {
+      updateState(setManageActionKeys(state));
+    });
+  }
+
+  const manageActionTransferBtn = container.querySelector('#manage-action-transfer-btn');
+  if (manageActionTransferBtn) {
+    manageActionTransferBtn.addEventListener('click', () => {
+      updateState(setManageActionTransfer(state));
+    });
+  }
+
   // Manage back button (various steps)
   const manageBackBtn = container.querySelector('#manage-back-btn');
   if (manageBackBtn) {
     manageBackBtn.addEventListener('click', () => {
       switch (state.step) {
         case 'manage_enter_identity':
-          updateState(setStep(state, 'init'));
+          updateState(setStep(state, 'manage_choose_action'));
           break;
         case 'manage_view_keys':
           updateState(setManageBackToEntry(state));
@@ -1456,6 +1509,140 @@ function setupEventListeners(container: HTMLElement) {
   }
 
   // ============================================================================
+  // Username Transfer Event Listeners
+  // ============================================================================
+
+  // Credential source tabs
+  const xferSourceSeedBtn = container.querySelector('#xfer-source-seed-btn');
+  if (xferSourceSeedBtn) {
+    xferSourceSeedBtn.addEventListener('click', () => {
+      updateState(setXferCredentialSource(state, 'seed'));
+    });
+  }
+
+  const xferSourceKeyBtn = container.querySelector('#xfer-source-key-btn');
+  if (xferSourceKeyBtn) {
+    xferSourceKeyBtn.addEventListener('click', () => {
+      updateState(setXferCredentialSource(state, 'key'));
+    });
+  }
+
+  // Seed phrase input — kept in state so it survives re-renders
+  const xferMnemonicInput = container.querySelector('#xfer-mnemonic-input');
+  if (xferMnemonicInput) {
+    xferMnemonicInput.addEventListener('input', (e) => {
+      const target = e.target as HTMLTextAreaElement;
+      updateState(setXferMnemonic(state, target.value));
+    });
+  }
+
+  // Unlock button
+  const xferUnlockBtn = container.querySelector('#xfer-unlock-btn');
+  if (xferUnlockBtn) {
+    xferUnlockBtn.addEventListener('click', () => {
+      if (!state.xferDiscovering) {
+        startXferUnlock();
+      }
+    });
+  }
+
+  // Transfer back button (various steps)
+  const xferBackBtn = container.querySelector('#xfer-back-btn');
+  if (xferBackBtn) {
+    xferBackBtn.addEventListener('click', () => {
+      switch (state.step) {
+        case 'xfer_credentials':
+          updateState(setStep(state, 'manage_choose_action'));
+          break;
+        case 'xfer_select_username':
+          updateState(setXferBackToCredentials(state));
+          break;
+        case 'xfer_review':
+          updateState(setXferBackToSelect(state));
+          break;
+        default:
+          updateState(setStep(state, 'init'));
+      }
+    });
+  }
+
+  // Username selection
+  container.querySelectorAll('.xfer-username-radio').forEach((radio) => {
+    radio.addEventListener('change', (e) => {
+      const target = e.target as HTMLInputElement;
+      const username = target.dataset.username;
+      if (username) {
+        updateState(setXferSelectedUsername(state, username));
+      }
+    });
+  });
+
+  // Destination identity input — verify on blur or paste
+  const xferRecipientInput = container.querySelector('#xfer-recipient-input');
+  if (xferRecipientInput) {
+    xferRecipientInput.addEventListener('input', (e) => {
+      const target = e.target as HTMLInputElement;
+      updateState(setXferRecipientId(state, target.value));
+    });
+
+    const verifyRecipient = () => {
+      const recipientId = (xferRecipientInput as HTMLInputElement).value.trim();
+      if (!recipientId || state.xferRecipientChecking) return;
+      startXferRecipientCheck(recipientId);
+    };
+
+    xferRecipientInput.addEventListener('blur', verifyRecipient);
+    xferRecipientInput.addEventListener('paste', () => {
+      setTimeout(verifyRecipient, 50);
+    });
+  }
+
+  // Continue to the confirmation screen
+  const xferSelectContinueBtn = container.querySelector('#xfer-select-continue-btn');
+  if (xferSelectContinueBtn) {
+    xferSelectContinueBtn.addEventListener('click', () => {
+      if (state.xferSelectedUsername && state.xferRecipientVerified) {
+        updateState(setXferReview(state));
+      }
+    });
+  }
+
+  // Irreversibility acknowledgement
+  const xferConfirmCheckbox = container.querySelector('#xfer-confirm-checkbox');
+  if (xferConfirmCheckbox) {
+    xferConfirmCheckbox.addEventListener('change', (e) => {
+      const target = e.target as HTMLInputElement;
+      updateState(setXferConfirmationAcknowledged(state, target.checked));
+    });
+  }
+
+  // Execute the transfer
+  const xferTransferBtn = container.querySelector('#xfer-transfer-btn');
+  if (xferTransferBtn) {
+    xferTransferBtn.addEventListener('click', () => {
+      if (state.xferConfirmationAcknowledged) {
+        startUsernameTransfer();
+      }
+    });
+  }
+
+  // Transfer another username (restarts the sub-flow)
+  const xferAgainBtn = container.querySelector('#xfer-again-btn');
+  if (xferAgainBtn) {
+    xferAgainBtn.addEventListener('click', () => {
+      updateState(setManageActionTransfer(state));
+    });
+  }
+
+  // Retry a failed transfer from the selection screen
+  const xferRetryBtn = container.querySelector('#xfer-retry-btn');
+  if (xferRetryBtn) {
+    xferRetryBtn.addEventListener('click', () => {
+      updateState(setXferBackToSelect(state));
+    });
+  }
+
+  // ============================================================================
   // ============================================================================
   // Key Backup Upload Handlers (shared across DPNS, manage, contract)
   // ============================================================================
@@ -1543,6 +1730,17 @@ function setupEventListeners(container: HTMLElement) {
     } catch (error) {
       updateState({ ...setManageIdentityFetchError(state, error instanceof Error ? error.message : String(error)), managePrivateKeyWif: result.privateKeyWif });
     }
+  });
+
+  // Username transfer key upload — fills in the identity ID + WIF, then unlocks
+  wireKeyUpload('xfer-key-upload', async (result) => {
+    updateState({
+      ...setTargetIdentityId(state, result.identityId),
+      xferPrivateKeyWif: result.privateKeyWif,
+    });
+    await startXferUnlockFromKey(result.identityId, result.privateKeyWif).catch((error) => {
+      updateState(setXferCredentialError(state, toError(error).message));
+    });
   });
 
   // Contract key upload — show loading, fetch identity + balance, validate key, update once
@@ -3188,6 +3386,300 @@ async function startManageUpdate() {
       success: false,
       error: errorMessage,
     }));
+  }
+}
+
+// ============================================================================
+// Username Transfer Functions
+// ============================================================================
+
+/**
+ * Load what the transfer flow needs once the identity and signing key are
+ * known: the names it owns, and the network's protocol version.
+ */
+async function loadTransferContext(identityId: string): Promise<{
+  usernames: string[];
+  protocolVersion?: number;
+}> {
+  const { listOwnedUsernames, getProtocolVersion } = await loadUsernameTransferModule();
+
+  const [usernames, protocolVersion] = await Promise.all([
+    listOwnedUsernames(identityId, state.network),
+    // Best-effort: a failed version read must not block the flow, it only
+    // suppresses the "this network is too old" warning.
+    getProtocolVersion(state.network).catch(() => undefined),
+  ]);
+
+  return { usernames, protocolVersion };
+}
+
+/**
+ * Resolve the identity and signing key from a seed phrase, then load the
+ * usernames it owns.
+ */
+async function startXferUnlockFromSeed(mnemonic: string) {
+  if (!isValidMnemonic(mnemonic)) {
+    updateState(setXferCredentialError(state, 'That is not a valid BIP39 seed phrase. Check for typos or missing words.'));
+    return;
+  }
+
+  updateState(setXferDiscovering(state, 'Deriving keys from your seed phrase...'));
+
+  if (isE2EMockMode()) {
+    await delay(60);
+    if (mnemonic !== normalizeMnemonic(E2E_MOCK_XFER_MNEMONIC)) {
+      updateState(setXferCredentialError(state, 'Mock mode: use the configured test seed phrase'));
+      return;
+    }
+    updateState(setXferIdentityUnlocked(state, {
+      identityId: E2E_MOCK_IDENTITY_ID,
+      privateKeyWif: E2E_MOCK_DPNS_WIF,
+      keyId: 1,
+      securityLevel: 2,
+      usernames: createE2EMockOwnedUsernames(),
+      protocolVersion: MIN_TRANSFER_PROTOCOL_VERSION,
+    }));
+    return;
+  }
+
+  const candidates = deriveCandidateKeys(mnemonic, state.network);
+
+  const { discoverIdentityFromCandidates } = await loadUsernameTransferModule();
+  const discovered = await discoverIdentityFromCandidates(
+    candidates,
+    state.network,
+    (checked, total) => {
+      updateState(setXferDiscoveryStatus(state, `Searching for your identity (${checked}/${total})...`));
+    }
+  );
+
+  if (!discovered) {
+    updateState(setXferCredentialError(
+      state,
+      'No identity on this network uses a key from that seed phrase. Check you picked the right network, or use the Private Key tab to enter an identity ID directly.'
+    ));
+    return;
+  }
+
+  updateState(setXferDiscoveryStatus(state, 'Identity found. Checking your keys...'));
+
+  const keys = await getIdentityPublicKeys(discovered.identityId, state.network);
+  const selection = selectTransferSigningKey(candidates, keys, state.network);
+
+  if (selection.status === 'ineligible') {
+    const reason = explainKeyIneligibility(selection.purpose, selection.securityLevel);
+    updateState(setXferCredentialError(
+      state,
+      `${reason} Use "Manage Keys" to add an AUTHENTICATION key with HIGH security level to this identity, then try again.`
+    ));
+    return;
+  }
+
+  if (selection.status === 'no_match') {
+    updateState(setXferCredentialError(
+      state,
+      'That seed phrase does not control any active key on the identity it points to.'
+    ));
+    return;
+  }
+
+  updateState(setXferDiscoveryStatus(state, 'Loading your usernames...'));
+
+  const { usernames, protocolVersion } = await loadTransferContext(discovered.identityId);
+
+  updateState(setXferIdentityUnlocked(state, {
+    identityId: discovered.identityId,
+    privateKeyWif: selection.candidate.privateKeyWif,
+    keyId: selection.keyId,
+    securityLevel: selection.securityLevel,
+    usernames,
+    protocolVersion,
+  }));
+}
+
+/**
+ * Validate an identity ID + WIF pair, then load the usernames it owns.
+ */
+async function startXferUnlockFromKey(identityId: string, privateKeyWif: string) {
+  if (!isValidIdentityId(identityId)) {
+    updateState(setXferCredentialError(state, 'Invalid identity ID format (expected 44 character Base58 string)'));
+    return;
+  }
+
+  if (!privateKeyWif) {
+    updateState(setXferCredentialError(state, 'Enter the private key for this identity'));
+    return;
+  }
+
+  updateState(setXferDiscovering(state, 'Fetching identity...'));
+
+  if (isE2EMockMode()) {
+    await delay(60);
+    if (privateKeyWif !== E2E_MOCK_DPNS_WIF) {
+      updateState(setXferCredentialError(state, 'Mock mode: use the configured test private key'));
+      return;
+    }
+    updateState(setXferIdentityUnlocked(state, {
+      identityId,
+      privateKeyWif,
+      keyId: 1,
+      securityLevel: 2,
+      usernames: createE2EMockOwnedUsernames(),
+      protocolVersion: MIN_TRANSFER_PROTOCOL_VERSION,
+    }));
+    return;
+  }
+
+  const keys = await getIdentityPublicKeys(identityId, state.network);
+  const match = findMatchingKeyIndex(privateKeyWif, keys.filter((k) => !k.isDisabled), state.network);
+
+  if (!match) {
+    updateState(setXferCredentialError(state, 'This key does not match any active key registered with this identity'));
+    return;
+  }
+
+  if (!isEligibleTransferKey(match.purpose, match.securityLevel)) {
+    const reason = explainKeyIneligibility(match.purpose, match.securityLevel);
+    updateState(setXferCredentialError(state, reason ?? 'This key cannot sign a username transfer.'));
+    return;
+  }
+
+  updateState(setXferDiscoveryStatus(state, 'Loading your usernames...'));
+
+  const { usernames, protocolVersion } = await loadTransferContext(identityId);
+
+  updateState(setXferIdentityUnlocked(state, {
+    identityId,
+    privateKeyWif,
+    keyId: match.keyId,
+    securityLevel: match.securityLevel,
+    usernames,
+    protocolVersion,
+  }));
+}
+
+/**
+ * Entry point for the "Continue" button on the credential screen.
+ */
+async function startXferUnlock() {
+  try {
+    const source = state.xferCredentialSource ?? 'seed';
+
+    if (source === 'seed') {
+      await startXferUnlockFromSeed(normalizeMnemonic(state.xferMnemonic || ''));
+      return;
+    }
+
+    const identityId = (
+      document.querySelector<HTMLInputElement>('#xfer-identity-id-input')?.value ?? ''
+    ).trim();
+    const privateKeyWif = (
+      document.querySelector<HTMLInputElement>('#xfer-private-key-input')?.value ?? ''
+    ).trim();
+
+    await startXferUnlockFromKey(identityId, privateKeyWif);
+  } catch (error) {
+    console.error('Username transfer unlock error:', error);
+    updateState(setXferCredentialError(state, toError(error).message));
+  }
+}
+
+/**
+ * Verify the destination identity exists before we let the user sign anything.
+ *
+ * Platform does not validate the recipient of a document transfer, so a
+ * mistyped ID would move the username to an identity nobody controls.
+ */
+async function startXferRecipientCheck(recipientId: string) {
+  if (!isValidIdentityId(recipientId)) {
+    updateState(setXferRecipientError(state, 'Invalid identity ID format (expected 44 character Base58 string)'));
+    return;
+  }
+
+  if (recipientId === state.targetIdentityId) {
+    updateState(setXferRecipientError(state, 'This is the identity that already owns the username'));
+    return;
+  }
+
+  updateState(setXferRecipientChecking(state));
+
+  try {
+    if (isE2EMockMode()) {
+      await delay(40);
+      if (recipientId === E2E_MOCK_XFER_RECIPIENT_ID) {
+        updateState(setXferRecipientVerified(state));
+      } else {
+        updateState(setXferRecipientError(state, 'Mock mode: use the configured test recipient identity'));
+      }
+      return;
+    }
+
+    const { identityExists } = await loadUsernameTransferModule();
+    const exists = await identityExists(recipientId, state.network);
+
+    if (exists) {
+      updateState(setXferRecipientVerified(state));
+    } else {
+      updateState(setXferRecipientError(
+        state,
+        `No identity with this ID exists on ${state.network}. Transferring to it would lose the username permanently.`
+      ));
+    }
+  } catch (error) {
+    console.error('Recipient verification error:', error);
+    updateState(setXferRecipientError(state, `Could not verify this identity: ${toError(error).message}`));
+  }
+}
+
+/**
+ * Sign and broadcast the username transfer.
+ */
+async function startUsernameTransfer() {
+  const username = state.xferSelectedUsername;
+  const identityId = state.targetIdentityId;
+  const privateKeyWif = state.xferPrivateKeyWif;
+  const recipientId = state.xferRecipientId;
+  const keyId = state.xferSigningKeyInfo?.keyId;
+
+  if (!username || !identityId || !privateKeyWif || !recipientId || keyId === undefined) {
+    updateState(setXferResult(state, { success: false, error: 'Missing transfer details' }));
+    return;
+  }
+
+  // The UI disables the button, but never sign a transition the network is
+  // going to reject outright.
+  if (state.xferProtocolVersion !== undefined && !isProtocolVersionSupported(state.xferProtocolVersion)) {
+    updateState(setXferResult(state, {
+      success: false,
+      error: `${state.network} runs protocol version ${state.xferProtocolVersion}; username transfers require version ${MIN_TRANSFER_PROTOCOL_VERSION} or later.`,
+    }));
+    return;
+  }
+
+  updateState(setXferTransferring(state));
+
+  try {
+    if (isE2EMockMode()) {
+      await delay(80);
+      updateState(setXferResult(state, { success: true, verifiedOwner: true, recordsUpdated: true }));
+      return;
+    }
+
+    const { transferUsername } = await loadUsernameTransferModule();
+    const result = await transferUsername({
+      username,
+      identityId,
+      publicKeyId: keyId,
+      privateKeyWif,
+      recipientId,
+      network: state.network,
+    });
+
+    updateState(setXferResult(state, result));
+  } catch (error) {
+    console.error('Username transfer error:', error);
+    // WasmSdkError is not a standard Error, so check for message property
+    updateState(setXferResult(state, { success: false, error: toError(error).message }));
   }
 }
 

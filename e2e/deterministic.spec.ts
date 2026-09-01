@@ -5,6 +5,8 @@ import {
   E2E_MOCK_MANAGE_WIF,
   E2E_MOCK_WITHDRAW_WIF,
   E2E_MOCK_WITHDRAW_ADDRESS,
+  E2E_MOCK_XFER_MNEMONIC,
+  E2E_MOCK_XFER_RECIPIENT_ID,
 } from '../src/e2e-mock-constants';
 
 const MOCK_QUERY = '/?network=testnet&e2e=mock';
@@ -72,6 +74,9 @@ test.describe('Deterministic UI E2E (mock mode)', () => {
     await page.goto(MOCK_QUERY);
 
     await page.click('#mode-manage-btn');
+    await expect(page.locator('#manage-action-keys-btn')).toBeVisible();
+
+    await page.click('#manage-action-keys-btn');
     await expect(page.locator('#manage-identity-id-input')).toBeVisible();
 
     await page.fill('#manage-identity-id-input', E2E_MOCK_IDENTITY_ID);
@@ -181,5 +186,56 @@ test.describe('Deterministic UI E2E (mock mode)', () => {
 
     await page.click('#register-dpns-btn');
     await expect(page.getByText('Registration Complete!')).toBeVisible();
+  });
+
+  test('username transfer flow discovers the identity from a seed phrase and completes', async ({ page }) => {
+    await page.goto(MOCK_QUERY);
+
+    await page.click('#mode-manage-btn');
+    await page.click('#manage-action-transfer-btn');
+    await expect(page.locator('#xfer-mnemonic-input')).toBeVisible();
+
+    // A phrase that fails the BIP39 checksum is rejected before any lookup.
+    await page.fill('#xfer-mnemonic-input', 'abandon abandon abandon');
+    await page.click('#xfer-unlock-btn');
+    await expect(page.getByText('That is not a valid BIP39 seed phrase.')).toBeVisible();
+
+    await page.fill('#xfer-mnemonic-input', E2E_MOCK_XFER_MNEMONIC);
+    await page.click('#xfer-unlock-btn');
+
+    await expect(page.getByText('Signing with key #1 (HIGH level)')).toBeVisible();
+    await expect(page.locator('.xfer-username-option')).toHaveCount(2);
+    await expect(page.locator('#xfer-select-continue-btn')).toBeDisabled();
+
+    await page.locator('.xfer-username-radio').first().click({ force: true });
+
+    // A malformed destination is rejected without a network round trip.
+    await page.fill('#xfer-recipient-input', 'not-an-identity');
+    await page.locator('#xfer-recipient-input').blur();
+    await expect(page.getByText('Invalid identity ID format')).toBeVisible();
+
+    // Transferring to yourself is a no-op the SDK would reject anyway.
+    await page.fill('#xfer-recipient-input', E2E_MOCK_IDENTITY_ID);
+    await page.locator('#xfer-recipient-input').blur();
+    await expect(page.getByText('This is the identity that already owns the username')).toBeVisible();
+    await expect(page.locator('#xfer-select-continue-btn')).toBeDisabled();
+
+    await page.fill('#xfer-recipient-input', E2E_MOCK_XFER_RECIPIENT_ID);
+    await page.locator('#xfer-recipient-input').blur();
+    await expect(page.getByText('Destination identity found')).toBeVisible();
+    await expect(page.locator('#xfer-select-continue-btn')).toBeEnabled();
+
+    await page.click('#xfer-select-continue-btn');
+    await expect(page.getByText('Confirm Transfer')).toBeVisible();
+    await expect(page.locator('#xfer-transfer-btn')).toBeDisabled();
+
+    await page.locator('#xfer-confirm-checkbox').click({ force: true });
+    await expect(page.locator('#xfer-transfer-btn')).toBeEnabled();
+
+    await page.click('#xfer-transfer-btn');
+    await expect(page.getByText('Username Transferred!')).toBeVisible();
+    await expect(
+      page.locator('.contract-id-section', { hasText: 'New Owner' }).locator('.identity-id')
+    ).toHaveText(E2E_MOCK_XFER_RECIPIENT_ID);
   });
 });

@@ -6,3 +6,6 @@ export const E2E_MOCK_WITHDRAW_WIF = 'cMockWithdrawPrivateKeyWif';
 export const E2E_MOCK_WITHDRAW_ADDRESS = 'ySMnpcCKx4wD57T5dhjz3t3im3hgaQ5JYG';
 /** Mock identity balance in credits (0.25 DASH). */
 export const E2E_MOCK_WITHDRAW_BALANCE = 25_000_000_000;
+export const E2E_MOCK_XFER_MNEMONIC =
+  'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
+export const E2E_MOCK_XFER_RECIPIENT_ID = '22222222222222222222222222222222222222222222';
