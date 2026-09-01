@@ -1607,8 +1607,10 @@ function setupEventListeners(container: HTMLElement) {
       ).trim();
 
       // The field may have been edited after the check without ever blurring —
-      // never carry a stale verification onto a different recipient.
-      if (typed && typed !== state.xferRecipientId) {
+      // never carry a stale verification onto a different recipient. An emptied
+      // field counts as a change too, so clearing it cannot silently advance
+      // with the previously verified ID.
+      if (typed !== state.xferRecipientId) {
         startXferRecipientCheck(typed);
         return;
       }
@@ -3610,6 +3612,11 @@ async function startXferRecipientCheck(recipientId: string) {
   // verification, and keeps the typed value through the re-render (the field is
   // uncontrolled between blurs).
   updateState(setXferRecipientId(state, recipientId));
+
+  if (!recipientId) {
+    updateState(setXferRecipientError(state, 'Enter the identity ID to transfer the username to'));
+    return;
+  }
 
   if (!isWellFormedIdentityId(recipientId)) {
     updateState(setXferRecipientError(state, 'Invalid identity ID (expected a Base58 string decoding to 32 bytes)'));
