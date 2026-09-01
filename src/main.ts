@@ -2218,9 +2218,7 @@ function setupEventListeners(container: HTMLElement) {
  * Validate identity ID format (Base58, ~44 characters)
  */
 function validateIdentityId(id?: string): boolean {
-  if (!id) return false;
-  // Dash identity IDs are Base58 encoded, typically 43-44 characters
-  return /^[1-9A-HJ-NP-Za-km-z]{43,44}$/.test(id);
+  return !!id && isValidIdentityId(id);
 }
 
 /**
