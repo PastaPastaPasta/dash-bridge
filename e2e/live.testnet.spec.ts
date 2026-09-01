@@ -26,7 +26,8 @@ test.describe('Live testnet E2E (optional)', () => {
 
     await page.goto('/?network=testnet&e2e=live');
 
-    await page.click('#mode-topup-btn');
+    await page.click('#mode-manage-btn');
+    await page.click('#manage-action-topup-btn');
     await page.fill('#identity-id-input', LIVE_TOPUP_IDENTITY_ID!);
     await page.click('#continue-topup-btn');
 

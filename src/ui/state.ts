@@ -132,7 +132,12 @@ export function setKeyPairs(
 }
 
 /**
- * Set bridge mode and transition to appropriate initial step
+ * Set bridge mode and transition to appropriate initial step.
+ *
+ * Note: a few transitions below assign `mode` directly rather than calling this,
+ * and so bypass `clearModeSensitiveFields`. Those clear `fromManageMenu`
+ * themselves, so the "only topup/withdraw can carry it" invariant holds
+ * structurally rather than by reachability.
  */
 export function setMode(state: BridgeState, mode: BridgeMode): BridgeState {
   const clearedState = clearModeSensitiveFields(state, mode);
@@ -259,6 +264,9 @@ function clearModeSensitiveFields(state: BridgeState, mode: BridgeMode): BridgeS
     // is the user's real wallet seed, so it must not outlive the flow that
     // asked for it.
     ...clearUsernameTransferFields(state),
+    // Re-entering a mode from the init screen or a deep link means we did not
+    // come through the Manage Identity menu; the chooser re-sets this itself.
+    fromManageMenu: undefined,
     recipientPlatformAddress: mode === 'send_to_address' ? state.recipientPlatformAddress : undefined,
     withdrawPrivateKeyWif: undefined,
     withdrawSigningKeyInfo: undefined,
@@ -831,6 +839,7 @@ export function setDpnsIdentitySource(
       ...state,
       step: 'configure_keys',
       mode: 'create', // Switch to create mode temporarily
+      fromManageMenu: undefined,
       mnemonic,
       identityKeys: generateDefaultIdentityKeysHD(state.network, mnemonic),
       dpnsIdentitySource: source,
@@ -1358,6 +1367,21 @@ export function setManageActionTransfer(state: BridgeState): BridgeState {
 }
 
 /**
+ * Manage mode: choose top-up. Unlike keys and transfer this is its own mode, so
+ * it goes through setMode and then records that the menu was the entry point.
+ */
+export function setManageActionTopUp(state: BridgeState): BridgeState {
+  return { ...setMode(state, 'topup'), fromManageMenu: true };
+}
+
+/**
+ * Manage mode: choose credit withdrawal. Also its own mode.
+ */
+export function setManageActionWithdraw(state: BridgeState): BridgeState {
+  return { ...setMode(state, 'withdraw'), fromManageMenu: true };
+}
+
+/**
  * Switch between seed phrase and identity ID + WIF credential entry
  */
 export function setXferCredentialSource(
@@ -1752,6 +1776,7 @@ export function setModeContractFromIdentity(state: BridgeState): BridgeState {
     ...state,
     step: 'contract_enter_contract',
     mode: 'contract',
+    fromManageMenu: undefined,
     contractIdentitySource: 'new',
     contractFromIdentityCreation: true,
     contractPrivateKeyWif: authKey?.privateKeyWif,
@@ -1768,6 +1793,7 @@ export function setContractStartBridge(state: BridgeState): BridgeState {
   return {
     ...state,
     mode: 'create' as BridgeMode,
+    fromManageMenu: undefined,
     step: 'configure_keys',
     mnemonic,
     identityKeys: generateDefaultIdentityKeysHD(state.network, mnemonic),

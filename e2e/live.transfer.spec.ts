@@ -57,7 +57,8 @@ test.describe('Live testnet username transfer', () => {
     test.skip(!identityId, 'set PW_XFER_TOPUP=<identityId> to run');
 
     await page.goto(LIVE_URL);
-    await page.click('#mode-topup-btn');
+    await page.click('#mode-manage-btn');
+    await page.click('#manage-action-topup-btn');
     await page.fill('#identity-id-input', identityId!);
     await page.click('#continue-topup-btn');
 
