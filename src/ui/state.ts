@@ -12,6 +12,7 @@ import type {
   ManageNewKeyConfig,
   AssetLockProofData,
   NetworkStatus,
+  OwnedUsername,
   UsernameTransferCredentialSource,
   UsernameTransferOutcome,
 } from '../types.js';
@@ -1333,6 +1334,7 @@ export function clearUsernameTransferFields(state: BridgeState): BridgeState {
     xferPrivateKeyWif: undefined,
     xferSigningKeyInfo: undefined,
     xferOwnedUsernames: undefined,
+    xferOtherIdentities: undefined,
     xferSelectedUsername: undefined,
     xferRecipientId: undefined,
     xferRecipientError: undefined,
@@ -1451,8 +1453,9 @@ export function setXferIdentityUnlocked(
     privateKeyWif: string;
     keyId: number;
     securityLevel: number;
-    usernames: string[];
+    usernames: OwnedUsername[];
     protocolVersion?: number;
+    otherIdentities?: string[];
   }
 ): BridgeState {
   return {
@@ -1464,9 +1467,10 @@ export function setXferIdentityUnlocked(
     xferPrivateKeyWif: params.privateKeyWif,
     xferSigningKeyInfo: { keyId: params.keyId, securityLevel: params.securityLevel },
     xferOwnedUsernames: params.usernames,
+    xferOtherIdentities: params.otherIdentities,
     xferProtocolVersion: params.protocolVersion,
     // Preselect when there is only one name to choose from.
-    xferSelectedUsername: params.usernames.length === 1 ? params.usernames[0] : undefined,
+    xferSelectedUsername: params.usernames.length === 1 ? params.usernames[0].username : undefined,
   };
 }
 
@@ -1594,6 +1598,7 @@ export function setXferBackToCredentials(state: BridgeState): BridgeState {
     xferSigningKeyInfo: undefined,
     xferPrivateKeyWif: undefined,
     xferOwnedUsernames: undefined,
+    xferOtherIdentities: undefined,
     xferSelectedUsername: undefined,
     xferRecipientId: undefined,
     xferRecipientVerified: undefined,

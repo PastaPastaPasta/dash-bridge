@@ -22,6 +22,17 @@ describe('DPNS username helpers', () => {
     expect(validateDpnsLabel('dash--user')).toEqual({ isValid: false, error: 'No consecutive hyphens allowed' });
   });
 
+  it('folds l, i and o, so a display label is not its normalizedLabel', () => {
+    // This is why a username cannot be resolved back to its document from the
+    // name shown in the UI: the index is on normalizedLabel, but the display
+    // form uses the raw label. Any name containing l, i or o diverges.
+    expect(convertToHomographSafe('testfjdksla234123')).toBe('testfjdks1a234123');
+    expect(convertToHomographSafe('pastafaucettesting1234')).toBe('pastafaucettest1ng1234');
+    // A name with none of those characters round-trips, which is how a live
+    // transfer of "xfertest7pasta" passed while the bug was present.
+    expect(convertToHomographSafe('xfertest7pasta')).toBe('xfertest7pasta');
+  });
+
   it('normalizes labels for homograph-safe contested-name checks', () => {
     expect(convertToHomographSafe('Oil-Loom')).toBe('011-100m');
     expect(isContestedUsername('dash')).toBe(true);
