@@ -132,7 +132,12 @@ export function setKeyPairs(
 }
 
 /**
- * Set bridge mode and transition to appropriate initial step
+ * Set bridge mode and transition to appropriate initial step.
+ *
+ * Note: a few transitions below assign `mode` directly rather than calling this,
+ * and so bypass `clearModeSensitiveFields`. Those clear `fromManageMenu`
+ * themselves, so the "only topup/withdraw can carry it" invariant holds
+ * structurally rather than by reachability.
  */
 export function setMode(state: BridgeState, mode: BridgeMode): BridgeState {
   const clearedState = clearModeSensitiveFields(state, mode);
@@ -834,6 +839,7 @@ export function setDpnsIdentitySource(
       ...state,
       step: 'configure_keys',
       mode: 'create', // Switch to create mode temporarily
+      fromManageMenu: undefined,
       mnemonic,
       identityKeys: generateDefaultIdentityKeysHD(state.network, mnemonic),
       dpnsIdentitySource: source,
@@ -1770,6 +1776,7 @@ export function setModeContractFromIdentity(state: BridgeState): BridgeState {
     ...state,
     step: 'contract_enter_contract',
     mode: 'contract',
+    fromManageMenu: undefined,
     contractIdentitySource: 'new',
     contractFromIdentityCreation: true,
     contractPrivateKeyWif: authKey?.privateKeyWif,
@@ -1786,6 +1793,7 @@ export function setContractStartBridge(state: BridgeState): BridgeState {
   return {
     ...state,
     mode: 'create' as BridgeMode,
+    fromManageMenu: undefined,
     step: 'configure_keys',
     mnemonic,
     identityKeys: generateDefaultIdentityKeysHD(state.network, mnemonic),

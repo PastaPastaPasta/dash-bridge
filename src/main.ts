@@ -700,7 +700,7 @@ function setupEventListeners(container: HTMLElement) {
     backBtn.addEventListener('click', () => {
       if (state.contractFromIdentityCreation) {
         // Return to contract review instead of init
-        updateState({ ...state, mode: 'contract', step: 'contract_review' });
+        updateState({ ...state, mode: 'contract', step: 'contract_review', fromManageMenu: undefined });
       } else if (state.fromManageMenu) {
         // Opened from the Manage Identity menu, so go back to it rather than
         // all the way out. setMode('manage') is the menu.
