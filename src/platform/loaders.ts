@@ -14,6 +14,7 @@ export function createCachedLoader<T>(load: () => Promise<T>): () => Promise<T> 
 export const loadPlatformModule = createCachedLoader(() => import('./index.js'));
 export const loadDpnsModule = createCachedLoader(() => import('./dpns.js'));
 export const loadContractModule = createCachedLoader(() => import('./contract.js'));
+export const loadUsernameTransferModule = createCachedLoader(() => import('./username-transfer.js'));
 export const loadPlatformClientModule = createCachedLoader(() => import('./client.js'));
 export const loadFeeEstimatorModule = createCachedLoader(() => import('dash-contract-fee-estimator'));
 export const loadIslockModule = createCachedLoader(() => import('../api/islock.js'));
@@ -23,6 +24,7 @@ export function warmDashModules(): Promise<PromiseSettledResult<unknown>[]> {
     loadPlatformModule(),
     loadDpnsModule(),
     loadContractModule(),
+    loadUsernameTransferModule(),
     loadPlatformClientModule(),
     loadFeeEstimatorModule(),
     loadIslockModule(),

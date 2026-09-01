@@ -1,6 +1,7 @@
 import type { BridgeState, KeyType, KeyPurpose, SecurityLevel, NetworkHealth } from '../types.js';
 import { getStepProgress, getStepDescription, ErrorCodes, ErrorCodeLabels } from './state.js';
 import { shouldShowContestedWarning, countUsernameStatuses } from '../platform/dpns-utils.js';
+import { MIN_TRANSFER_PROTOCOL_VERSION, isProtocolVersionBlocked } from '../platform/username-transfer-utils.js';
 import { generateQRCodeDataUrl } from './qrcode.js';
 import { privateKeyToWif } from '../utils/wif.js';
 import { formatCreditsAsDash, formatCredits, MIN_WITHDRAWAL_CREDITS } from '../utils/credits.js';
@@ -287,6 +288,10 @@ export function render(state: BridgeState, container: HTMLElement): void {
       break;
 
     // Identity Management steps
+    case 'manage_choose_action':
+      content.appendChild(renderManageChooseActionStep(state));
+      break;
+
     case 'manage_enter_identity':
       content.appendChild(renderManageEnterIdentityStep(state));
       break;
@@ -301,6 +306,27 @@ export function render(state: BridgeState, container: HTMLElement): void {
 
     case 'manage_complete':
       content.appendChild(renderManageCompleteStep(state));
+      break;
+
+    // Username transfer steps
+    case 'xfer_credentials':
+      content.appendChild(renderXferCredentialsStep(state));
+      break;
+
+    case 'xfer_select_username':
+      content.appendChild(renderXferSelectUsernameStep(state));
+      break;
+
+    case 'xfer_review':
+      content.appendChild(renderXferReviewStep(state));
+      break;
+
+    case 'xfer_transferring':
+      content.appendChild(renderXferTransferringStep(state));
+      break;
+
+    case 'xfer_complete':
+      content.appendChild(renderXferCompleteStep(state));
       break;
 
     // Contract registration steps
@@ -2651,6 +2677,471 @@ function renderWithdrawCompleteStep(state: BridgeState): HTMLElement {
 
   const startOverBtn = document.createElement('button');
   startOverBtn.id = 'withdraw-start-over-btn';
+  startOverBtn.className = 'secondary-btn';
+  startOverBtn.textContent = 'Start Over';
+  actionButtons.appendChild(startOverBtn);
+
+  div.appendChild(actionButtons);
+
+  return div;
+}
+
+// ============================================================================
+// Username Transfer Steps
+// ============================================================================
+
+/**
+ * Render the Manage mode landing screen: key management or username transfer.
+ */
+function renderManageChooseActionStep(_state: BridgeState): HTMLElement {
+  const div = document.createElement('div');
+  div.className = 'manage-choose-action-step';
+
+  const headline = document.createElement('h2');
+  headline.className = 'manage-headline';
+  headline.textContent = 'Manage Identity';
+  div.appendChild(headline);
+
+  const subtitle = document.createElement('p');
+  subtitle.className = 'manage-subtitle';
+  subtitle.textContent = 'Change the keys on an identity, or move a username to another identity.';
+  div.appendChild(subtitle);
+
+  const choiceButtons = document.createElement('div');
+  choiceButtons.className = 'manage-choice-buttons';
+  choiceButtons.innerHTML = `
+    <button id="manage-action-keys-btn" class="mode-btn primary-btn">
+      <span class="mode-label">Manage Keys</span>
+      <span class="mode-desc">Add or disable keys on an identity you own</span>
+    </button>
+    <button id="manage-action-transfer-btn" class="mode-btn secondary-btn">
+      <span class="mode-label">Transfer a Username</span>
+      <span class="mode-desc">Move a DPNS username to another identity</span>
+    </button>
+  `;
+  div.appendChild(choiceButtons);
+
+  const navButtons = document.createElement('div');
+  navButtons.className = 'nav-buttons';
+  const backBtn = document.createElement('button');
+  backBtn.id = 'back-btn';
+  backBtn.className = 'secondary-btn';
+  backBtn.textContent = 'Back';
+  navButtons.appendChild(backBtn);
+  div.appendChild(navButtons);
+
+  return div;
+}
+
+/**
+ * Render the transfer credential entry step: a seed phrase (which also
+ * discovers the identity) or an identity ID plus a private key.
+ */
+function renderXferCredentialsStep(state: BridgeState): HTMLElement {
+  const source = state.xferCredentialSource ?? 'seed';
+
+  const div = document.createElement('div');
+  div.className = 'xfer-credentials-step';
+  // Only a dropzone on the tab that actually shows the upload control —
+  // otherwise dropping a key file on the seed-phrase tab silently unlocks by a
+  // route the user cannot see.
+  if (source === 'key') {
+    div.id = 'xfer-key-upload-dropzone';
+  }
+
+  const headline = document.createElement('h2');
+  headline.className = 'xfer-headline';
+  headline.textContent = 'Unlock Your Identity';
+  div.appendChild(headline);
+  const isDiscovering = state.xferDiscoveryStatus !== undefined;
+
+  const tabs = document.createElement('div');
+  tabs.className = 'xfer-source-tabs';
+  tabs.innerHTML = `
+    <button id="xfer-source-seed-btn" class="xfer-tab ${source === 'seed' ? 'active' : ''}">Seed Phrase</button>
+    <button id="xfer-source-key-btn" class="xfer-tab ${source === 'key' ? 'active' : ''}">Private Key</button>
+  `;
+  div.appendChild(tabs);
+
+  const form = document.createElement('div');
+  form.className = 'xfer-credentials-form';
+
+  if (source === 'seed') {
+    form.innerHTML = `
+      <div class="input-group">
+        <label class="input-label">Seed Phrase</label>
+        <textarea
+          id="xfer-mnemonic-input"
+          class="xfer-input xfer-mnemonic"
+          rows="3"
+          placeholder="Your 12 or 24 word recovery phrase..."
+          ${isDiscovering ? 'disabled' : ''}
+        >${escapeHtml(state.xferMnemonic || '')}</textarea>
+        <p class="input-hint">Used in your browser only, to find your identity and sign the transfer. It is never sent anywhere.</p>
+      </div>
+    `;
+  } else {
+    form.innerHTML = `
+      ${renderKeyUploadSection('xfer-key-upload')}
+
+      <div class="input-group">
+        <label class="input-label">Identity ID</label>
+        <input
+          type="text"
+          id="xfer-identity-id-input"
+          class="xfer-input"
+          placeholder="Your 44-character identity ID..."
+          value="${escapeAttr(state.targetIdentityId || '')}"
+          ${isDiscovering ? 'disabled' : ''}
+        />
+        <p class="input-hint">The Base58 identifier for the identity that owns the username</p>
+      </div>
+
+      <div class="input-group">
+        <label class="input-label">Private Key (WIF)</label>
+        <input
+          type="password"
+          id="xfer-private-key-input"
+          class="xfer-input"
+          placeholder="Your private key in WIF format..."
+          value="${escapeAttr(state.xferPrivateKeyWif || '')}"
+          ${isDiscovering ? 'disabled' : ''}
+        />
+        <p class="input-hint">An AUTHENTICATION key with CRITICAL or HIGH security level</p>
+      </div>
+    `;
+  }
+
+  div.appendChild(form);
+
+  if (isDiscovering) {
+    const status = document.createElement('p');
+    status.className = 'identity-status loading';
+    status.textContent = state.xferDiscoveryStatus!;
+    div.appendChild(status);
+  } else if (state.xferCredentialError) {
+    const error = document.createElement('p');
+    error.className = 'identity-status error';
+    error.textContent = state.xferCredentialError;
+    div.appendChild(error);
+  }
+
+  const navButtons = document.createElement('div');
+  navButtons.className = 'nav-buttons';
+
+  const backBtn = document.createElement('button');
+  backBtn.id = 'xfer-back-btn';
+  backBtn.className = 'secondary-btn';
+  backBtn.textContent = 'Back';
+  navButtons.appendChild(backBtn);
+
+  const unlockBtn = document.createElement('button');
+  unlockBtn.id = 'xfer-unlock-btn';
+  unlockBtn.className = 'primary-btn';
+  unlockBtn.textContent = isDiscovering ? 'Unlocking...' : 'Continue';
+  if (isDiscovering) {
+    unlockBtn.setAttribute('disabled', 'true');
+  }
+  navButtons.appendChild(unlockBtn);
+
+  div.appendChild(navButtons);
+
+  return div;
+}
+
+/**
+ * Render the username selection + destination step.
+ */
+function renderXferSelectUsernameStep(state: BridgeState): HTMLElement {
+  const div = document.createElement('div');
+  div.className = 'xfer-select-username-step';
+
+  const headline = document.createElement('h2');
+  headline.className = 'xfer-headline';
+  headline.textContent = 'Choose a Username';
+  div.appendChild(headline);
+
+  const identityId = state.targetIdentityId || 'Unknown';
+  div.appendChild(renderIdSection('From Identity', identityId, {
+    explorerHref: explorerUrl(state.network, 'identity', identityId),
+    copyBtnId: 'copy-xfer-source-btn',
+  }));
+
+  if (state.xferSigningKeyInfo) {
+    const keyInfo = document.createElement('p');
+    keyInfo.className = 'key-status success';
+    keyInfo.textContent = `Signing with key #${state.xferSigningKeyInfo.keyId} (${getSecurityLevelName(state.xferSigningKeyInfo.securityLevel)} level)`;
+    div.appendChild(keyInfo);
+  }
+
+  const protocolVersion = state.xferProtocolVersion;
+  const protocolUnsupported = isProtocolVersionBlocked(protocolVersion);
+  if (protocolUnsupported) {
+    const warning = document.createElement('div');
+    warning.className = 'warning-box';
+    warning.innerHTML = `
+      <p><strong>This network cannot transfer usernames yet.</strong></p>
+      <p>${escapeHtml(state.network)} is running protocol version ${protocolVersion}. Username transfers require version ${MIN_TRANSFER_PROTOCOL_VERSION} or later.</p>
+    `;
+    div.appendChild(warning);
+  }
+
+  const usernames = state.xferOwnedUsernames || [];
+  const list = document.createElement('div');
+  list.className = 'xfer-username-list';
+
+  if (usernames.length === 0) {
+    list.innerHTML = `<p class="input-hint">This identity does not own any usernames.</p>`;
+  } else {
+    list.innerHTML = usernames
+      .map((username) => `
+        <label class="xfer-username-option">
+          <input
+            type="radio"
+            name="xfer-username"
+            class="xfer-username-radio"
+            data-username="${escapeAttr(username)}"
+            ${state.xferSelectedUsername === username ? 'checked' : ''}
+          />
+          <span class="xfer-username-label">${escapeHtml(username)}</span>
+        </label>
+      `)
+      .join('');
+  }
+  div.appendChild(list);
+
+  // Destination
+  let recipientStatusHtml = '';
+  if (state.xferRecipientChecking) {
+    recipientStatusHtml = '<p class="identity-status loading">Checking destination identity...</p>';
+  } else if (state.xferRecipientError) {
+    recipientStatusHtml = `<p class="identity-status error">${escapeHtml(state.xferRecipientError)}</p>`;
+  } else if (state.xferRecipientVerified) {
+    recipientStatusHtml = '<p class="identity-status success">Destination identity found</p>';
+  }
+
+  const recipientGroup = document.createElement('div');
+  recipientGroup.className = 'input-group';
+  recipientGroup.innerHTML = `
+    <label class="input-label">Destination Identity ID</label>
+    <input
+      type="text"
+      id="xfer-recipient-input"
+      class="xfer-input"
+      placeholder="The 44-character identity ID to transfer to..."
+      value="${escapeAttr(state.xferRecipientId || '')}"
+    />
+    <p class="input-hint">Dash Platform does not check that this identity exists, so we verify it before transferring. A wrong ID would lose the username permanently.</p>
+    ${recipientStatusHtml}
+  `;
+  div.appendChild(recipientGroup);
+
+  const navButtons = document.createElement('div');
+  navButtons.className = 'nav-buttons';
+
+  const backBtn = document.createElement('button');
+  backBtn.id = 'xfer-back-btn';
+  backBtn.className = 'secondary-btn';
+  backBtn.textContent = 'Back';
+  navButtons.appendChild(backBtn);
+
+  const continueBtn = document.createElement('button');
+  continueBtn.id = 'xfer-select-continue-btn';
+  continueBtn.className = 'primary-btn';
+  continueBtn.textContent = 'Continue';
+  const canContinue =
+    !protocolUnsupported &&
+    state.xferSelectedUsername !== undefined &&
+    state.xferRecipientVerified === true;
+  if (!canContinue) {
+    continueBtn.setAttribute('disabled', 'true');
+  }
+  navButtons.appendChild(continueBtn);
+
+  div.appendChild(navButtons);
+
+  return div;
+}
+
+/**
+ * Render the irreversible-transfer confirmation step.
+ */
+function renderXferReviewStep(state: BridgeState): HTMLElement {
+  const div = document.createElement('div');
+  div.className = 'xfer-review-step';
+
+  const headline = document.createElement('h2');
+  headline.className = 'xfer-headline';
+  headline.textContent = 'Confirm Transfer';
+  div.appendChild(headline);
+
+  const warning = document.createElement('div');
+  warning.className = 'warning-box';
+  warning.innerHTML = `
+    <p><strong>This cannot be undone.</strong></p>
+    <p>Once transferred, only the destination identity can move the username again. If the destination is wrong, the username is gone for good.</p>
+  `;
+  div.appendChild(warning);
+
+  const summary = document.createElement('div');
+  summary.className = 'xfer-summary';
+  summary.innerHTML = `
+    <div class="xfer-summary-row">
+      <span class="xfer-summary-label">Username</span>
+      <code class="xfer-summary-value">${escapeHtml(state.xferSelectedUsername || '')}</code>
+    </div>
+    <div class="xfer-summary-row">
+      <span class="xfer-summary-label">From</span>
+      <code class="xfer-summary-value">${escapeHtml(state.targetIdentityId || '')}</code>
+    </div>
+    <div class="xfer-summary-row">
+      <span class="xfer-summary-label">To</span>
+      <code class="xfer-summary-value">${escapeHtml(state.xferRecipientId || '')}</code>
+    </div>
+  `;
+  div.appendChild(summary);
+
+  const confirmation = document.createElement('div');
+  confirmation.className = 'xfer-confirmation';
+  confirmation.innerHTML = `
+    <label class="checkbox-label">
+      <input type="checkbox" id="xfer-confirm-checkbox" ${state.xferConfirmationAcknowledged ? 'checked' : ''} />
+      <span>I have checked the destination identity ID and understand this transfer is permanent.</span>
+    </label>
+  `;
+  div.appendChild(confirmation);
+
+  const navButtons = document.createElement('div');
+  navButtons.className = 'nav-buttons';
+
+  const backBtn = document.createElement('button');
+  backBtn.id = 'xfer-back-btn';
+  backBtn.className = 'secondary-btn';
+  backBtn.textContent = 'Back';
+  navButtons.appendChild(backBtn);
+
+  const transferBtn = document.createElement('button');
+  transferBtn.id = 'xfer-transfer-btn';
+  transferBtn.className = 'primary-btn';
+  transferBtn.textContent = 'Transfer Username';
+  if (!state.xferConfirmationAcknowledged) {
+    transferBtn.setAttribute('disabled', 'true');
+  }
+  navButtons.appendChild(transferBtn);
+
+  div.appendChild(navButtons);
+
+  return div;
+}
+
+/**
+ * Render the in-progress transfer step.
+ */
+function renderXferTransferringStep(state: BridgeState): HTMLElement {
+  const div = document.createElement('div');
+  div.className = 'xfer-transferring-step';
+
+  const headline = document.createElement('h2');
+  headline.className = 'xfer-headline';
+  headline.textContent = 'Transferring Username';
+  div.appendChild(headline);
+
+  const subtitle = document.createElement('p');
+  subtitle.className = 'xfer-subtitle';
+  subtitle.textContent = `Submitting the transfer of ${state.xferSelectedUsername || 'your username'} to Dash Platform...`;
+  div.appendChild(subtitle);
+
+  const spinner = document.createElement('div');
+  spinner.className = 'spinner large';
+  div.appendChild(spinner);
+
+  return div;
+}
+
+/**
+ * Render the transfer result step.
+ */
+function renderXferCompleteStep(state: BridgeState): HTMLElement {
+  const div = document.createElement('div');
+  div.className = 'xfer-complete-step';
+
+  const result = state.xferResult;
+  const isSuccess = result?.success === true;
+
+  const headline = document.createElement('h2');
+  headline.className = 'xfer-headline';
+  headline.textContent = isSuccess ? 'Username Transferred!' : 'Transfer Failed';
+  div.appendChild(headline);
+
+  if (isSuccess) {
+    const successMsg = document.createElement('p');
+    successMsg.className = 'xfer-success-msg';
+    successMsg.textContent = `${state.xferSelectedUsername} now belongs to ${state.xferRecipientId}.`;
+    div.appendChild(successMsg);
+
+    // Surface a partial result honestly rather than implying the name resolves.
+    if (result?.verifiedOwner && result.recordsUpdated === false) {
+      const note = document.createElement('div');
+      note.className = 'warning-box';
+      note.innerHTML = `
+        <p>Ownership moved, but the name's identity record still points at the previous owner.</p>
+        <p>Dash Platform rewrites that record on transfer from protocol version ${MIN_TRANSFER_PROTOCOL_VERSION}. On an older network the username may not resolve to the new owner.</p>
+      `;
+      div.appendChild(note);
+    } else if (result?.verifiedOwner === false) {
+      const note = document.createElement('p');
+      note.className = 'input-hint';
+      note.textContent = 'The transfer was submitted, but we could not read the document back to confirm it. Check the explorer in a moment.';
+      div.appendChild(note);
+    }
+  } else {
+    const errorMsg = document.createElement('div');
+    errorMsg.className = 'xfer-error-msg';
+    errorMsg.innerHTML = `
+      <p>${result?.unconfirmed
+        ? 'The transfer failed, but we could not read the username back to confirm that.'
+        : 'The username could not be transferred.'}</p>
+      <p class="error-detail">${escapeHtml(result?.error || 'Unknown error')}</p>
+    `;
+    div.appendChild(errorMsg);
+
+    if (result?.unconfirmed) {
+      const note = document.createElement('div');
+      note.className = 'warning-box';
+      note.innerHTML = `
+        <p><strong>Check before retrying.</strong></p>
+        <p>The transfer may still have gone through. Look the username up on the explorer first — if it already belongs to the destination, do not transfer again.</p>
+      `;
+      div.appendChild(note);
+    }
+  }
+
+  if (state.xferRecipientId) {
+    div.appendChild(renderIdSection(isSuccess ? 'New Owner' : 'Intended Recipient', state.xferRecipientId, {
+      explorerHref: explorerUrl(state.network, 'identity', state.xferRecipientId),
+      copyBtnId: 'copy-xfer-recipient-btn',
+    }));
+  }
+
+  const actionButtons = document.createElement('div');
+  actionButtons.className = 'xfer-action-buttons';
+
+  if (isSuccess) {
+    const againBtn = document.createElement('button');
+    againBtn.id = 'xfer-again-btn';
+    againBtn.className = 'primary-btn';
+    againBtn.textContent = 'Transfer Another';
+    actionButtons.appendChild(againBtn);
+  } else {
+    const retryBtn = document.createElement('button');
+    retryBtn.id = 'xfer-retry-btn';
+    retryBtn.className = 'primary-btn';
+    retryBtn.textContent = 'Try Again';
+    actionButtons.appendChild(retryBtn);
+  }
+
+  const startOverBtn = document.createElement('button');
+  startOverBtn.id = 'retry-btn';
   startOverBtn.className = 'secondary-btn';
   startOverBtn.textContent = 'Start Over';
   actionButtons.appendChild(startOverBtn);

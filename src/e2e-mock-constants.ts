@@ -1,4 +1,8 @@
-export const E2E_MOCK_IDENTITY_ID = '11111111111111111111111111111111111111111111';
+/**
+ * Structurally valid identity IDs: Base58 decoding to exactly 32 bytes, so
+ * mock-mode runs exercise the same identifier validation as a real network.
+ */
+export const E2E_MOCK_IDENTITY_ID = '4ufjwRfdhMM87uBaGmTvesgLm6k2Q2r7SVyZdTUzFebA';
 export const E2E_MOCK_DPNS_WIF = 'cMockDpnsPrivateKeyWif';
 export const E2E_MOCK_MANAGE_WIF = 'cMockManagePrivateKeyWif';
 export const E2E_MOCK_WITHDRAW_WIF = 'cMockWithdrawPrivateKeyWif';
@@ -6,3 +10,6 @@ export const E2E_MOCK_WITHDRAW_WIF = 'cMockWithdrawPrivateKeyWif';
 export const E2E_MOCK_WITHDRAW_ADDRESS = 'ySMnpcCKx4wD57T5dhjz3t3im3hgaQ5JYG';
 /** Mock identity balance in credits (0.25 DASH). */
 export const E2E_MOCK_WITHDRAW_BALANCE = 25_000_000_000;
+export const E2E_MOCK_XFER_MNEMONIC =
+  'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
+export const E2E_MOCK_XFER_RECIPIENT_ID = '4uvqP8FNZCyqYgPe3GUxP18RWdiLqxne1h4d4byFhdqK';

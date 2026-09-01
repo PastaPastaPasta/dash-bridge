@@ -1232,14 +1232,16 @@
        ============================================================================ */
 
     /* DPNS Headlines and subtitles */
-    .dpns-headline {
+    .dpns-headline,
+    .xfer-headline {
       color: #fff;
       font-size: 1.4rem;
       margin-bottom: 8px;
       text-align: center;
     }
 
-    .dpns-subtitle {
+    .dpns-subtitle,
+    .xfer-subtitle {
       color: #888;
       font-size: 0.9rem;
       margin-bottom: 24px;
@@ -1247,7 +1249,8 @@
     }
 
     /* DPNS choice buttons (same as mode-buttons) */
-    .dpns-choice-buttons {
+    .dpns-choice-buttons,
+    .manage-choice-buttons {
       display: flex;
       flex-direction: column;
       gap: 12px;
@@ -1255,16 +1258,20 @@
     }
 
     /* DPNS identity form */
-    .dpns-identity-form {
+    .dpns-identity-form,
+    .xfer-credentials-form {
       text-align: left;
       margin-bottom: 16px;
     }
 
-    .dpns-identity-form .input-group {
+    .dpns-identity-form .input-group,
+    .xfer-credentials-form .input-group,
+    .xfer-select-username-step .input-group {
       margin-bottom: 16px;
     }
 
-    .dpns-input {
+    .dpns-input,
+    .xfer-input {
       width: 100%;
       background: rgba(0, 0, 0, 0.3);
       border: 2px solid rgba(255, 255, 255, 0.1);
@@ -1276,12 +1283,14 @@
       transition: border-color 0.2s;
     }
 
-    .dpns-input:focus {
+    .dpns-input:focus,
+    .xfer-input:focus {
       outline: none;
       border-color: #008de4;
     }
 
-    .dpns-input::placeholder {
+    .dpns-input::placeholder,
+    .xfer-input::placeholder {
       color: #555;
     }
 
@@ -1990,11 +1999,199 @@
       word-break: break-word;
     }
 
-    .manage-action-buttons {
+    .manage-action-buttons,
+    .xfer-action-buttons {
       display: flex;
       flex-direction: column;
       gap: 12px;
       margin-top: 24px;
+    }
+
+    /* ============================================================================
+       Username Transfer Styles
+       ============================================================================ */
+
+    /* Seed phrase / private key tabs */
+    .xfer-source-tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 20px;
+    }
+
+    .xfer-tab {
+      flex: 1;
+      background: rgba(0, 0, 0, 0.3);
+      border: 2px solid rgba(255, 255, 255, 0.1);
+      color: #888;
+      padding: 12px 16px;
+      border-radius: 10px;
+      font-size: 0.9rem;
+      cursor: pointer;
+      transition: border-color 0.2s, color 0.2s;
+    }
+
+    .xfer-tab:hover {
+      color: #ccc;
+    }
+
+    .xfer-tab.active {
+      border-color: #008de4;
+      color: #fff;
+    }
+
+    .xfer-mnemonic {
+      resize: vertical;
+      line-height: 1.6;
+    }
+
+    /* Shared warning callout */
+    .warning-box {
+      background: rgba(255, 152, 0, 0.1);
+      border: 1px solid rgba(255, 152, 0, 0.3);
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 20px;
+      text-align: left;
+    }
+
+    .warning-box p {
+      color: #b0b0b0;
+      font-size: 0.9rem;
+      margin-bottom: 10px;
+    }
+
+    .warning-box p:last-child {
+      margin-bottom: 0;
+    }
+
+    .warning-box strong {
+      color: #ff9800;
+    }
+
+    /* Owned username picker */
+    .xfer-username-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin: 20px 0;
+      text-align: left;
+    }
+
+    .xfer-username-option {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: rgba(0, 0, 0, 0.2);
+      border: 2px solid rgba(255, 255, 255, 0.1);
+      border-radius: 10px;
+      padding: 14px 16px;
+      cursor: pointer;
+      transition: border-color 0.2s;
+    }
+
+    .xfer-username-option:hover {
+      border-color: rgba(255, 255, 255, 0.25);
+    }
+
+    .xfer-username-radio {
+      width: 18px;
+      height: 18px;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    .xfer-username-label {
+      color: #fff;
+      font-family: 'SF Mono', Monaco, monospace;
+      font-size: 0.95rem;
+      word-break: break-all;
+    }
+
+    /* Confirmation summary */
+    .xfer-summary {
+      background: rgba(0, 0, 0, 0.2);
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 20px;
+      text-align: left;
+    }
+
+    .xfer-summary-row {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin-bottom: 14px;
+    }
+
+    .xfer-summary-row:last-child {
+      margin-bottom: 0;
+    }
+
+    .xfer-summary-label {
+      color: #888;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .xfer-summary-value {
+      color: #fff;
+      font-family: 'SF Mono', Monaco, monospace;
+      font-size: 0.9rem;
+      word-break: break-all;
+    }
+
+    .xfer-confirmation {
+      margin-bottom: 20px;
+    }
+
+    .checkbox-label {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      color: #b0b0b0;
+      font-size: 0.85rem;
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .checkbox-label input[type="checkbox"] {
+      margin-top: 3px;
+      width: 18px;
+      height: 18px;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    .xfer-transferring-step,
+    .xfer-complete-step {
+      text-align: center;
+    }
+
+    .xfer-success-msg {
+      color: #4CAF50;
+      font-size: 1rem;
+      margin-bottom: 20px;
+      word-break: break-all;
+    }
+
+    .xfer-error-msg {
+      background: rgba(244, 67, 54, 0.1);
+      border: 1px solid rgba(244, 67, 54, 0.3);
+      padding: 16px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+    }
+
+    .xfer-error-msg p {
+      color: #b0b0b0;
+      margin: 4px 0;
+    }
+
+    .xfer-error-msg .error-detail {
+      color: #f44336;
+      font-size: 0.85rem;
+      word-break: break-word;
     }
 
     /* ============================================================================
@@ -2594,7 +2791,9 @@
       .dpns-action-buttons .primary-btn,
       .dpns-action-buttons .secondary-btn,
       .manage-action-buttons .primary-btn,
-      .manage-action-buttons .secondary-btn {
+      .manage-action-buttons .secondary-btn,
+      .xfer-action-buttons .primary-btn,
+      .xfer-action-buttons .secondary-btn {
         width: 100%;
       }
 

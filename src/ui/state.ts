@@ -12,6 +12,8 @@ import type {
   ManageNewKeyConfig,
   AssetLockProofData,
   NetworkStatus,
+  UsernameTransferCredentialSource,
+  UsernameTransferOutcome,
 } from '../types.js';
 import {
   generateDefaultIdentityKeysHD,
@@ -43,6 +45,7 @@ export const ErrorCodes = {
   CONTRACT_REGISTER: 'ERR-1013',
   CHAINLOCK:        'ERR-1014',
   WITHDRAW:         'ERR-1015',
+  USERNAME_TRANSFER: 'ERR-1016',
 } as const;
 
 /** Human-readable labels for error codes */
@@ -63,6 +66,7 @@ export const ErrorCodeLabels: Record<string, string> = {
   [ErrorCodes.CONTRACT_REGISTER]: 'Contract registration failed',
   [ErrorCodes.CHAINLOCK]:        'Chain lock fallback failed',
   [ErrorCodes.WITHDRAW]:         'Credit withdrawal failed',
+  [ErrorCodes.USERNAME_TRANSFER]: 'Username transfer failed',
 };
 
 /** Map a processing step to its error code */
@@ -82,6 +86,7 @@ const StepErrorCodes: Partial<Record<BridgeStep, string>> = {
   contract_registering: ErrorCodes.CONTRACT_REGISTER,
   withdraw_submitting:  ErrorCodes.WITHDRAW,
   withdraw_tracking:    ErrorCodes.WITHDRAW,
+  xfer_transferring:    ErrorCodes.USERNAME_TRANSFER,
 };
 
 /** Coerce an unknown caught value into an Error */
@@ -226,10 +231,10 @@ export function setMode(state: BridgeState, mode: BridgeMode): BridgeState {
       withdrawStatusError: undefined,
     };
   } else {
-    // Manage mode: go to identity entry
+    // Manage mode: choose between key management and username transfer
     return {
       ...clearedState,
-      step: 'manage_enter_identity',
+      step: 'manage_choose_action',
       mode,
       // Clear any previous manage state
       manageKeysToAdd: [],
@@ -241,6 +246,7 @@ export function setMode(state: BridgeState, mode: BridgeMode): BridgeState {
       manageIdentityKeys: undefined,
       manageUpdateResult: undefined,
       manageKeyValidationError: undefined,
+      targetIdentityId: undefined,
     };
   }
 }
@@ -249,7 +255,10 @@ function clearModeSensitiveFields(state: BridgeState, mode: BridgeMode): BridgeS
   // setMode('withdraw') re-clears the withdraw block itself, so these can be
   // dropped unconditionally here.
   return {
-    ...state,
+    // Drop the transfer flow's credentials on any mode switch. `xferMnemonic`
+    // is the user's real wallet seed, so it must not outlive the flow that
+    // asked for it.
+    ...clearUsernameTransferFields(state),
     recipientPlatformAddress: mode === 'send_to_address' ? state.recipientPlatformAddress : undefined,
     withdrawPrivateKeyWif: undefined,
     withdrawSigningKeyInfo: undefined,
@@ -668,10 +677,17 @@ export function getStepDescription(step: BridgeStep): string {
     dpns_registering: 'Registering...',
     dpns_complete: 'Registration complete',
     // Identity Management steps
+    manage_choose_action: 'Manage identity',
     manage_enter_identity: 'Manage identity',
     manage_view_keys: 'Manage keys',
     manage_updating: 'Updating identity...',
     manage_complete: 'Update complete',
+    // Username transfer steps
+    xfer_credentials: 'Unlock your identity',
+    xfer_select_username: 'Choose a username',
+    xfer_review: 'Confirm transfer',
+    xfer_transferring: 'Transferring username...',
+    xfer_complete: 'Transfer complete',
     // Contract registration steps
     contract_choose_identity: 'Register contract',
     contract_enter_identity: 'Enter identity',
@@ -720,10 +736,17 @@ export function getStepProgress(step: BridgeStep): number {
     dpns_registering: 80,
     dpns_complete: 100,
     // Identity Management steps
+    manage_choose_action: 10,
     manage_enter_identity: 20,
     manage_view_keys: 40,
     manage_updating: 70,
     manage_complete: 100,
+    // Username transfer steps
+    xfer_credentials: 20,
+    xfer_select_username: 40,
+    xfer_review: 60,
+    xfer_transferring: 85,
+    xfer_complete: 100,
     // Contract registration steps
     contract_choose_identity: 10,
     contract_enter_identity: 20,
@@ -761,6 +784,8 @@ export function isProcessingStep(step: BridgeStep): boolean {
     'dpns_registering',
     // Identity Management processing steps
     'manage_updating',
+    // Username transfer processing steps
+    'xfer_transferring',
     // Contract registration processing steps
     'contract_registering',
     // Withdraw processing steps
@@ -1279,6 +1304,288 @@ export function setManageBackToEntry(state: BridgeState): BridgeState {
     manageKeyValidationError: undefined,
     manageKeysToAdd: [],
     manageKeyIdsToDisable: [],
+  };
+}
+
+// ============================================================================
+// Username Transfer State Functions
+// ============================================================================
+
+/**
+ * Clear every field belonging to the username transfer sub-flow.
+ */
+export function clearUsernameTransferFields(state: BridgeState): BridgeState {
+  return {
+    ...state,
+    xferCredentialSource: undefined,
+    xferMnemonic: undefined,
+    xferDiscoveryStatus: undefined,
+    xferCredentialError: undefined,
+    xferPrivateKeyWif: undefined,
+    xferSigningKeyInfo: undefined,
+    xferOwnedUsernames: undefined,
+    xferSelectedUsername: undefined,
+    xferRecipientId: undefined,
+    xferRecipientError: undefined,
+    xferRecipientVerified: undefined,
+    xferRecipientChecking: undefined,
+    xferProtocolVersion: undefined,
+    xferConfirmationAcknowledged: undefined,
+    xferResult: undefined,
+  };
+}
+
+/**
+ * Manage mode: choose the key management path
+ */
+export function setManageActionKeys(state: BridgeState): BridgeState {
+  return {
+    ...clearUsernameTransferFields(state),
+    step: 'manage_enter_identity',
+    targetIdentityId: undefined,
+  };
+}
+
+/**
+ * Manage mode: choose the username transfer path
+ */
+export function setManageActionTransfer(state: BridgeState): BridgeState {
+  return {
+    ...clearUsernameTransferFields(state),
+    step: 'xfer_credentials',
+    targetIdentityId: undefined,
+  };
+}
+
+/**
+ * Switch between seed phrase and identity ID + WIF credential entry
+ */
+export function setXferCredentialSource(
+  state: BridgeState,
+  source: UsernameTransferCredentialSource
+): BridgeState {
+  return {
+    ...state,
+    xferCredentialSource: source,
+    xferCredentialError: undefined,
+    xferDiscoveryStatus: undefined,
+    xferSigningKeyInfo: undefined,
+    xferPrivateKeyWif: undefined,
+  };
+}
+
+/**
+ * Record seed phrase input without validating it yet
+ */
+export function setXferMnemonic(state: BridgeState, mnemonic: string): BridgeState {
+  return {
+    ...state,
+    xferMnemonic: mnemonic,
+    xferCredentialError: undefined,
+  };
+}
+
+/**
+ * Start identity discovery / unlock
+ */
+export function setXferDiscovering(state: BridgeState, status: string): BridgeState {
+  return {
+    ...state,
+    xferDiscoveryStatus: status,
+    xferCredentialError: undefined,
+  };
+}
+
+/**
+ * Update the discovery progress message without leaving the discovering state
+ */
+export function setXferDiscoveryStatus(state: BridgeState, status: string): BridgeState {
+  return {
+    ...state,
+    xferDiscoveryStatus: status,
+  };
+}
+
+/**
+ * Discovery or credential validation failed
+ */
+export function setXferCredentialError(state: BridgeState, error: string): BridgeState {
+  return {
+    ...state,
+    xferDiscoveryStatus: undefined,
+    xferCredentialError: error,
+  };
+}
+
+/**
+ * Credentials accepted: we know the identity, its signing key, and what it owns
+ */
+export function setXferIdentityUnlocked(
+  state: BridgeState,
+  params: {
+    identityId: string;
+    privateKeyWif: string;
+    keyId: number;
+    securityLevel: number;
+    usernames: string[];
+    protocolVersion?: number;
+  }
+): BridgeState {
+  return {
+    ...state,
+    step: 'xfer_select_username',
+    targetIdentityId: params.identityId,
+    xferDiscoveryStatus: undefined,
+    xferCredentialError: undefined,
+    xferPrivateKeyWif: params.privateKeyWif,
+    xferSigningKeyInfo: { keyId: params.keyId, securityLevel: params.securityLevel },
+    xferOwnedUsernames: params.usernames,
+    xferProtocolVersion: params.protocolVersion,
+    // Preselect when there is only one name to choose from.
+    xferSelectedUsername: params.usernames.length === 1 ? params.usernames[0] : undefined,
+  };
+}
+
+/**
+ * Select which username to transfer
+ */
+export function setXferSelectedUsername(state: BridgeState, username: string): BridgeState {
+  return {
+    ...state,
+    xferSelectedUsername: username,
+  };
+}
+
+/**
+ * Record the destination identity ID. Any edit invalidates a previous check.
+ */
+export function setXferRecipientId(state: BridgeState, recipientId: string): BridgeState {
+  return {
+    ...state,
+    xferRecipientId: recipientId,
+    xferRecipientVerified: undefined,
+    xferRecipientError: undefined,
+  };
+}
+
+/**
+ * Start verifying that the recipient identity exists
+ */
+export function setXferRecipientChecking(state: BridgeState): BridgeState {
+  return {
+    ...state,
+    xferRecipientChecking: true,
+    xferRecipientError: undefined,
+    xferRecipientVerified: undefined,
+  };
+}
+
+/**
+ * Recipient identity confirmed to exist on Platform
+ */
+export function setXferRecipientVerified(state: BridgeState): BridgeState {
+  return {
+    ...state,
+    xferRecipientChecking: false,
+    xferRecipientVerified: true,
+    xferRecipientError: undefined,
+  };
+}
+
+/**
+ * Recipient identity could not be confirmed.
+ *
+ * This is a hard gate rather than a warning: Platform does not check that a
+ * transfer recipient exists, so a mistyped ID would orphan the username.
+ */
+export function setXferRecipientError(state: BridgeState, error: string): BridgeState {
+  return {
+    ...state,
+    xferRecipientChecking: false,
+    xferRecipientVerified: false,
+    xferRecipientError: error,
+  };
+}
+
+/**
+ * Move to the confirmation screen
+ */
+export function setXferReview(state: BridgeState): BridgeState {
+  return {
+    ...state,
+    step: 'xfer_review',
+    xferConfirmationAcknowledged: false,
+  };
+}
+
+/**
+ * Toggle the "I understand this is irreversible" checkbox
+ */
+export function setXferConfirmationAcknowledged(
+  state: BridgeState,
+  acknowledged: boolean
+): BridgeState {
+  return {
+    ...state,
+    xferConfirmationAcknowledged: acknowledged,
+  };
+}
+
+/**
+ * Start the transfer
+ */
+export function setXferTransferring(state: BridgeState): BridgeState {
+  return {
+    ...state,
+    step: 'xfer_transferring',
+  };
+}
+
+/**
+ * Transfer finished (successfully or not).
+ *
+ * On success the seed phrase and signing key are dropped — nothing downstream
+ * needs them. On failure they are kept, since "Try Again" signs again.
+ */
+export function setXferResult(
+  state: BridgeState,
+  result: UsernameTransferOutcome
+): BridgeState {
+  return {
+    ...state,
+    step: 'xfer_complete',
+    xferResult: result,
+    xferMnemonic: result.success ? undefined : state.xferMnemonic,
+    xferPrivateKeyWif: result.success ? undefined : state.xferPrivateKeyWif,
+  };
+}
+
+/**
+ * Go back to credential entry, keeping the seed phrase the user typed
+ */
+export function setXferBackToCredentials(state: BridgeState): BridgeState {
+  return {
+    ...state,
+    step: 'xfer_credentials',
+    xferSigningKeyInfo: undefined,
+    xferPrivateKeyWif: undefined,
+    xferOwnedUsernames: undefined,
+    xferSelectedUsername: undefined,
+    xferRecipientId: undefined,
+    xferRecipientVerified: undefined,
+    xferRecipientError: undefined,
+    xferConfirmationAcknowledged: undefined,
+  };
+}
+
+/**
+ * Go back to username selection from the review screen
+ */
+export function setXferBackToSelect(state: BridgeState): BridgeState {
+  return {
+    ...state,
+    step: 'xfer_select_username',
+    xferConfirmationAcknowledged: undefined,
   };
 }
 
