@@ -1232,14 +1232,16 @@
        ============================================================================ */
 
     /* DPNS Headlines and subtitles */
-    .dpns-headline {
+    .dpns-headline,
+    .xfer-headline {
       color: #fff;
       font-size: 1.4rem;
       margin-bottom: 8px;
       text-align: center;
     }
 
-    .dpns-subtitle {
+    .dpns-subtitle,
+    .xfer-subtitle {
       color: #888;
       font-size: 0.9rem;
       margin-bottom: 24px;
@@ -1247,7 +1249,8 @@
     }
 
     /* DPNS choice buttons (same as mode-buttons) */
-    .dpns-choice-buttons {
+    .dpns-choice-buttons,
+    .manage-choice-buttons {
       display: flex;
       flex-direction: column;
       gap: 12px;
@@ -1255,16 +1258,20 @@
     }
 
     /* DPNS identity form */
-    .dpns-identity-form {
+    .dpns-identity-form,
+    .xfer-credentials-form {
       text-align: left;
       margin-bottom: 16px;
     }
 
-    .dpns-identity-form .input-group {
+    .dpns-identity-form .input-group,
+    .xfer-credentials-form .input-group,
+    .xfer-select-username-step .input-group {
       margin-bottom: 16px;
     }
 
-    .dpns-input {
+    .dpns-input,
+    .xfer-input {
       width: 100%;
       background: rgba(0, 0, 0, 0.3);
       border: 2px solid rgba(255, 255, 255, 0.1);
@@ -1276,12 +1283,14 @@
       transition: border-color 0.2s;
     }
 
-    .dpns-input:focus {
+    .dpns-input:focus,
+    .xfer-input:focus {
       outline: none;
       border-color: #008de4;
     }
 
-    .dpns-input::placeholder {
+    .dpns-input::placeholder,
+    .xfer-input::placeholder {
       color: #555;
     }
 
@@ -1990,7 +1999,8 @@
       word-break: break-word;
     }
 
-    .manage-action-buttons {
+    .manage-action-buttons,
+    .xfer-action-buttons {
       display: flex;
       flex-direction: column;
       gap: 12px;
@@ -2000,27 +2010,6 @@
     /* ============================================================================
        Username Transfer Styles
        ============================================================================ */
-
-    /* Manage action chooser (same as mode-buttons) */
-    .manage-choice-buttons {
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-      margin-bottom: 24px;
-    }
-
-    .xfer-headline {
-      font-size: 1.4rem;
-      margin-bottom: 8px;
-      text-align: center;
-    }
-
-    .xfer-subtitle {
-      color: #888;
-      font-size: 0.9rem;
-      margin-bottom: 24px;
-      text-align: center;
-    }
 
     /* Seed phrase / private key tabs */
     .xfer-source-tabs {
@@ -2048,37 +2037,6 @@
     .xfer-tab.active {
       border-color: #008de4;
       color: #fff;
-    }
-
-    .xfer-credentials-form {
-      text-align: left;
-      margin-bottom: 16px;
-    }
-
-    .xfer-credentials-form .input-group,
-    .xfer-select-username-step .input-group {
-      margin-bottom: 16px;
-    }
-
-    .xfer-input {
-      width: 100%;
-      background: rgba(0, 0, 0, 0.3);
-      border: 2px solid rgba(255, 255, 255, 0.1);
-      color: #fff;
-      padding: 16px 18px;
-      border-radius: 10px;
-      font-family: 'SF Mono', Monaco, monospace;
-      font-size: 1rem;
-      transition: border-color 0.2s;
-    }
-
-    .xfer-input:focus {
-      outline: none;
-      border-color: #008de4;
-    }
-
-    .xfer-input::placeholder {
-      color: #555;
     }
 
     .xfer-mnemonic {
@@ -2234,13 +2192,6 @@
       color: #f44336;
       font-size: 0.85rem;
       word-break: break-word;
-    }
-
-    .xfer-action-buttons {
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-      margin-top: 24px;
     }
 
     /* ============================================================================
@@ -2840,7 +2791,9 @@
       .dpns-action-buttons .primary-btn,
       .dpns-action-buttons .secondary-btn,
       .manage-action-buttons .primary-btn,
-      .manage-action-buttons .secondary-btn {
+      .manage-action-buttons .secondary-btn,
+      .xfer-action-buttons .primary-btn,
+      .xfer-action-buttons .secondary-btn {
         width: 100%;
       }
 

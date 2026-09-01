@@ -3,10 +3,12 @@ import { withRetry, type RetryOptions } from '../utils/retry.js';
 import { bytesToHex } from '../utils/hex.js';
 import {
   PLATFORM_PUT_SETTINGS,
+  fetchIdentity,
   fetchIdentityWithSdk,
   withConnectedPlatformSdk,
   withPlatformOperationTimeout,
 } from './client.js';
+import { extractErrorMessage } from '../utils/errors.js';
 import { loadSdkModule } from './sdkModule.js';
 import type { DerivedCandidateKey } from './username-transfer-utils.js';
 import type { UsernameTransferOutcome } from '../types.js';
@@ -15,8 +17,8 @@ import type { UsernameTransferOutcome } from '../types.js';
  * DPNS is a system data contract with the same ID on every network.
  * Source: packages/dpns-contract/lib/systemIds.js in dashpay/platform.
  */
-export const DPNS_CONTRACT_ID = 'GWRSAVFMjXx8HpQFaNJMqBV7MBgMK4br5UESsB4S31Ec';
-export const DPNS_DOCUMENT_TYPE = 'domain';
+const DPNS_CONTRACT_ID = 'GWRSAVFMjXx8HpQFaNJMqBV7MBgMK4br5UESsB4S31Ec';
+const DPNS_DOCUMENT_TYPE = 'domain';
 
 /** Usernames query defaults to a limit of 10; ask for more than anyone owns. */
 const USERNAME_LIST_LIMIT = 100;
@@ -31,14 +33,14 @@ export interface DiscoveredIdentity {
  *
  * Tries the unique public-key-hash index first, then the non-unique one, since
  * identity keys may be registered either way. Both lookups throw on a miss as
- * well as on a transport failure, so `answered` records whether at least one
- * query actually completed — the caller needs that to tell "this seed owns
+ * well as on a transport failure, so an absent `error` records that at least
+ * one query actually completed — the caller needs that to tell "this seed owns
  * nothing" apart from "the network is unreachable".
  */
 async function findIdentityIdByPublicKeyHash(
   sdk: EvoSDK,
   publicKeyHash: Uint8Array
-): Promise<{ identityId?: string; answered: boolean; error?: unknown }> {
+): Promise<{ identityId?: string; error?: unknown }> {
   const hashHex = bytesToHex(publicKeyHash);
   let lastError: unknown;
   let answered = false;
@@ -46,7 +48,7 @@ async function findIdentityIdByPublicKeyHash(
   try {
     const identity = await sdk.identities.byPublicKeyHash(hashHex);
     answered = true;
-    if (identity) return { identityId: identity.id.toString(), answered };
+    if (identity) return { identityId: identity.id.toString() };
   } catch (error) {
     lastError = error;
   }
@@ -54,12 +56,14 @@ async function findIdentityIdByPublicKeyHash(
   try {
     const identities = await sdk.identities.byNonUniquePublicKeyHash(hashHex);
     answered = true;
-    if (identities.length > 0) return { identityId: identities[0].id.toString(), answered };
+    if (identities.length > 0) return { identityId: identities[0].id.toString() };
   } catch (error) {
     lastError = error;
   }
 
-  return { answered, error: answered ? undefined : lastError };
+  // An absent `error` means at least one query came back — i.e. a real
+  // "no such identity", not a network problem.
+  return answered ? {} : { error: lastError };
 }
 
 /**
@@ -90,8 +94,11 @@ export async function discoverIdentityFromCandidates(
         if (result.identityId) {
           return { identityId: result.identityId, candidate };
         }
-        anyAnswered ||= result.answered;
-        lastError = result.error ?? lastError;
+        if (result.error === undefined) {
+          anyAnswered = true;
+        } else {
+          lastError = result.error;
+        }
       }
 
       if (!anyAnswered && lastError !== undefined) {
@@ -155,15 +162,8 @@ export async function identityExists(
   network: string,
   retryOptions?: RetryOptions
 ): Promise<boolean> {
-  return withConnectedPlatformSdk(
-    network,
-    async (sdk) => {
-      // fetchIdentityWithSdk already retries internally.
-      const identity = await fetchIdentityWithSdk(sdk, identityId, retryOptions);
-      return identity !== undefined && identity !== null;
-    },
-    retryOptions
-  );
+  const identity = await fetchIdentity(identityId, network, retryOptions);
+  return identity !== undefined && identity !== null;
 }
 
 /**
@@ -293,10 +293,11 @@ export async function transferUsername(
       const signer = new IdentitySigner();
       signer.addKeyFromWif(privateKeyWif);
 
+      let broadcastError: unknown;
       try {
         // Deliberately not wrapped in withRetry: a retry after a broadcast that
         // actually landed fails the revision check and would report a false
-        // failure. The catch below re-reads the document instead.
+        // failure. The read-back below settles what really happened instead.
         await withPlatformOperationTimeout(
           sdk.documents.transfer({
             document,
@@ -308,29 +309,39 @@ export async function transferUsername(
           'transferring username'
         );
       } catch (error) {
-        const ownership = await readDomainOwnership(sdk, documentId).catch(() => undefined);
-        if (ownership?.ownerId === recipientId) {
-          // The transition landed; only the wait failed.
-          return {
-            success: true,
-            verifiedOwner: true,
-            recordsUpdated: ownership.recordIdentity === recipientId,
-          };
-        }
-
-        const message =
-          error && typeof error === 'object' && 'message' in error
-            ? String((error as { message: unknown }).message)
-            : String(error);
-        return { success: false, error: message };
+        broadcastError = error;
       }
 
-      const ownership = await readDomainOwnership(sdk, documentId).catch(() => undefined);
-      return {
-        success: true,
-        verifiedOwner: ownership?.ownerId === recipientId,
-        recordsUpdated: ownership?.recordIdentity === recipientId,
-      };
+      // This read is what turns a thrown timeout into a truthful answer, so it
+      // gets the same retry treatment as the other reads here.
+      const ownership = await withRetry(
+        () => readDomainOwnership(sdk, documentId),
+        retryOptions
+      ).catch(() => undefined);
+
+      if (ownership?.ownerId === recipientId) {
+        // Landed — whether or not the wait phase threw.
+        return {
+          success: true,
+          verifiedOwner: true,
+          recordsUpdated: ownership.recordIdentity === recipientId,
+        };
+      }
+
+      if (broadcastError !== undefined) {
+        return {
+          success: false,
+          error: extractErrorMessage(broadcastError),
+          // If we could not read the document back we genuinely do not know
+          // whether the transfer landed, and the UI must not present a blind
+          // retry as safe.
+          unconfirmed: ownership === undefined,
+        };
+      }
+
+      // The SDK reported success but the document does not show the new owner
+      // yet — most likely read-your-writes lag rather than a failure.
+      return { success: true, verifiedOwner: false };
     },
     retryOptions
   );

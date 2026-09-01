@@ -167,13 +167,13 @@ import {
 import {
   deriveCandidateKeys,
   explainKeyIneligibility,
-  isEligibleTransferKey,
-  isProtocolVersionSupported,
+  isProtocolVersionBlocked,
   isValidIdentityId,
   isValidMnemonic,
   normalizeMnemonic,
   selectTransferSigningKey,
   MIN_TRANSFER_PROTOCOL_VERSION,
+  type SigningKeySelection,
 } from './platform/username-transfer-utils.js';
 import { loadSdkModule } from './platform/sdkModule.js';
 import type {
@@ -1540,7 +1540,7 @@ function setupEventListeners(container: HTMLElement) {
   const xferUnlockBtn = container.querySelector('#xfer-unlock-btn');
   if (xferUnlockBtn) {
     xferUnlockBtn.addEventListener('click', () => {
-      if (!state.xferDiscovering) {
+      if (!state.xferDiscoveryStatus) {
         startXferUnlock();
       }
     });
@@ -1738,9 +1738,7 @@ function setupEventListeners(container: HTMLElement) {
       ...setTargetIdentityId(state, result.identityId),
       xferPrivateKeyWif: result.privateKeyWif,
     });
-    await startXferUnlockFromKey(result.identityId, result.privateKeyWif).catch((error) => {
-      updateState(setXferCredentialError(state, toError(error).message));
-    });
+    await guardXferUnlock(() => startXferUnlockFromKey(result.identityId, result.privateKeyWif));
   });
 
   // Contract key upload — show loading, fetch identity + balance, validate key, update once
@@ -3426,19 +3424,13 @@ async function startXferUnlockFromSeed(mnemonic: string) {
   updateState(setXferDiscovering(state, 'Deriving keys from your seed phrase...'));
 
   if (isE2EMockMode()) {
-    await delay(60);
-    if (mnemonic !== normalizeMnemonic(E2E_MOCK_XFER_MNEMONIC)) {
-      updateState(setXferCredentialError(state, 'Mock mode: use the configured test seed phrase'));
-      return;
-    }
-    updateState(setXferIdentityUnlocked(state, {
-      identityId: E2E_MOCK_IDENTITY_ID,
-      privateKeyWif: E2E_MOCK_DPNS_WIF,
-      keyId: 1,
-      securityLevel: 2,
-      usernames: createE2EMockOwnedUsernames(),
-      protocolVersion: MIN_TRANSFER_PROTOCOL_VERSION,
-    }));
+    await unlockXferMock(
+      E2E_MOCK_IDENTITY_ID,
+      E2E_MOCK_DPNS_WIF,
+      mnemonic === normalizeMnemonic(E2E_MOCK_XFER_MNEMONIC)
+        ? undefined
+        : 'Mock mode: use the configured test seed phrase'
+    );
     return;
   }
 
@@ -3464,37 +3456,11 @@ async function startXferUnlockFromSeed(mnemonic: string) {
   updateState(setXferDiscoveryStatus(state, 'Identity found. Checking your keys...'));
 
   const keys = await getIdentityPublicKeys(discovered.identityId, state.network);
-  const selection = selectTransferSigningKey(candidates, keys, state.network);
-
-  if (selection.status === 'ineligible') {
-    const reason = explainKeyIneligibility(selection.purpose, selection.securityLevel);
-    updateState(setXferCredentialError(
-      state,
-      `${reason} Use "Manage Keys" to add an AUTHENTICATION key with HIGH security level to this identity, then try again.`
-    ));
-    return;
-  }
-
-  if (selection.status === 'no_match') {
-    updateState(setXferCredentialError(
-      state,
-      'That seed phrase does not control any active key on the identity it points to.'
-    ));
-    return;
-  }
-
-  updateState(setXferDiscoveryStatus(state, 'Loading your usernames...'));
-
-  const { usernames, protocolVersion } = await loadTransferContext(discovered.identityId);
-
-  updateState(setXferIdentityUnlocked(state, {
-    identityId: discovered.identityId,
-    privateKeyWif: selection.candidate.privateKeyWif,
-    keyId: selection.keyId,
-    securityLevel: selection.securityLevel,
-    usernames,
-    protocolVersion,
-  }));
+  await applyXferKeySelection(
+    discovered.identityId,
+    selectTransferSigningKey(candidates, keys, state.network),
+    'That seed phrase does not control any active key on the identity it points to.'
+  );
 }
 
 /**
@@ -3514,33 +3480,43 @@ async function startXferUnlockFromKey(identityId: string, privateKeyWif: string)
   updateState(setXferDiscovering(state, 'Fetching identity...'));
 
   if (isE2EMockMode()) {
-    await delay(60);
-    if (privateKeyWif !== E2E_MOCK_DPNS_WIF) {
-      updateState(setXferCredentialError(state, 'Mock mode: use the configured test private key'));
-      return;
-    }
-    updateState(setXferIdentityUnlocked(state, {
+    await unlockXferMock(
       identityId,
       privateKeyWif,
-      keyId: 1,
-      securityLevel: 2,
-      usernames: createE2EMockOwnedUsernames(),
-      protocolVersion: MIN_TRANSFER_PROTOCOL_VERSION,
-    }));
+      privateKeyWif === E2E_MOCK_DPNS_WIF
+        ? undefined
+        : 'Mock mode: use the configured test private key'
+    );
     return;
   }
 
   const keys = await getIdentityPublicKeys(identityId, state.network);
-  const match = findMatchingKeyIndex(privateKeyWif, keys.filter((k) => !k.isDisabled), state.network);
+  await applyXferKeySelection(
+    identityId,
+    selectTransferSigningKey([{ privateKeyWif }], keys, state.network),
+    'This key does not match any active key registered with this identity'
+  );
+}
 
-  if (!match) {
-    updateState(setXferCredentialError(state, 'This key does not match any active key registered with this identity'));
+/**
+ * Shared tail of both unlock paths: report why the key cannot sign, or load the
+ * identity's usernames and move on to selection.
+ */
+async function applyXferKeySelection(
+  identityId: string,
+  selection: SigningKeySelection<{ privateKeyWif: string }>,
+  noMatchMessage: string
+) {
+  if (selection.status === 'no_match') {
+    updateState(setXferCredentialError(state, noMatchMessage));
     return;
   }
 
-  if (!isEligibleTransferKey(match.purpose, match.securityLevel)) {
-    const reason = explainKeyIneligibility(match.purpose, match.securityLevel);
-    updateState(setXferCredentialError(state, reason ?? 'This key cannot sign a username transfer.'));
+  if (selection.status === 'ineligible') {
+    updateState(setXferCredentialError(
+      state,
+      `${explainKeyIneligibility(selection.purpose, selection.securityLevel)} Use "Manage Keys" to add an AUTHENTICATION key with HIGH security level to this identity, then try again.`
+    ));
     return;
   }
 
@@ -3550,22 +3526,54 @@ async function startXferUnlockFromKey(identityId: string, privateKeyWif: string)
 
   updateState(setXferIdentityUnlocked(state, {
     identityId,
-    privateKeyWif,
-    keyId: match.keyId,
-    securityLevel: match.securityLevel,
+    privateKeyWif: selection.candidate.privateKeyWif,
+    keyId: selection.keyId,
+    securityLevel: selection.securityLevel,
     usernames,
     protocolVersion,
   }));
 }
 
 /**
+ * Deterministic stand-in for identity discovery in Playwright mock mode.
+ */
+async function unlockXferMock(identityId: string, privateKeyWif: string, rejection?: string) {
+  await delay(60);
+
+  if (rejection) {
+    updateState(setXferCredentialError(state, rejection));
+    return;
+  }
+
+  updateState(setXferIdentityUnlocked(state, {
+    identityId,
+    privateKeyWif,
+    keyId: 1,
+    securityLevel: 2,
+    usernames: createE2EMockOwnedUsernames(),
+    protocolVersion: MIN_TRANSFER_PROTOCOL_VERSION,
+  }));
+}
+
+/**
+ * Run an unlock attempt, surfacing any failure on the credential screen rather
+ * than leaving the user on a stuck spinner.
+ */
+async function guardXferUnlock(run: () => Promise<void>) {
+  try {
+    await run();
+  } catch (error) {
+    console.error('Username transfer unlock error:', error);
+    updateState(setXferCredentialError(state, toError(error).message));
+  }
+}
+
+/**
  * Entry point for the "Continue" button on the credential screen.
  */
-async function startXferUnlock() {
-  try {
-    const source = state.xferCredentialSource ?? 'seed';
-
-    if (source === 'seed') {
+function startXferUnlock() {
+  return guardXferUnlock(async () => {
+    if ((state.xferCredentialSource ?? 'seed') === 'seed') {
       await startXferUnlockFromSeed(normalizeMnemonic(state.xferMnemonic || ''));
       return;
     }
@@ -3578,10 +3586,7 @@ async function startXferUnlock() {
     ).trim();
 
     await startXferUnlockFromKey(identityId, privateKeyWif);
-  } catch (error) {
-    console.error('Username transfer unlock error:', error);
-    updateState(setXferCredentialError(state, toError(error).message));
-  }
+  });
 }
 
 /**
@@ -3648,7 +3653,7 @@ async function startUsernameTransfer() {
 
   // The UI disables the button, but never sign a transition the network is
   // going to reject outright.
-  if (state.xferProtocolVersion !== undefined && !isProtocolVersionSupported(state.xferProtocolVersion)) {
+  if (isProtocolVersionBlocked(state.xferProtocolVersion)) {
     updateState(setXferResult(state, {
       success: false,
       error: `${state.network} runs protocol version ${state.xferProtocolVersion}; username transfers require version ${MIN_TRANSFER_PROTOCOL_VERSION} or later.`,

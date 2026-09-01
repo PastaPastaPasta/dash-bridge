@@ -140,6 +140,13 @@ export interface UsernameTransferOutcome {
   verifiedOwner?: boolean;
   /** Whether `records.identity` was rewritten, so the name resolves to the recipient */
   recordsUpdated?: boolean;
+  /**
+   * Set on failure when the domain document could not be read back, so we
+   * genuinely do not know whether the transfer landed. Distinct from a
+   * confirmed failure, because a transfer that landed must not be retried
+   * blindly.
+   */
+  unconfirmed?: boolean;
 }
 
 /**
@@ -387,9 +394,11 @@ export interface BridgeState {
   xferCredentialSource?: UsernameTransferCredentialSource;
   /** Transfer: raw seed phrase input (kept so the field survives re-render) */
   xferMnemonic?: string;
-  /** Transfer: identity discovery / lookup in progress */
-  xferDiscovering?: boolean;
-  /** Transfer: progress message shown while discovering or loading usernames */
+  /**
+   * Transfer: progress message shown while discovering or loading usernames.
+   * Its presence *is* the "discovery in progress" flag — a separate boolean
+   * would allow a discovering-without-a-message state that means nothing.
+   */
   xferDiscoveryStatus?: string;
   /** Transfer: credential entry error message */
   xferCredentialError?: string;

@@ -233,7 +233,7 @@ export function setMode(state: BridgeState, mode: BridgeMode): BridgeState {
   } else {
     // Manage mode: choose between key management and username transfer
     return {
-      ...clearUsernameTransferFields(clearedState),
+      ...clearedState,
       step: 'manage_choose_action',
       mode,
       // Clear any previous manage state
@@ -255,7 +255,10 @@ function clearModeSensitiveFields(state: BridgeState, mode: BridgeMode): BridgeS
   // setMode('withdraw') re-clears the withdraw block itself, so these can be
   // dropped unconditionally here.
   return {
-    ...state,
+    // Drop the transfer flow's credentials on any mode switch. `xferMnemonic`
+    // is the user's real wallet seed, so it must not outlive the flow that
+    // asked for it.
+    ...clearUsernameTransferFields(state),
     recipientPlatformAddress: mode === 'send_to_address' ? state.recipientPlatformAddress : undefined,
     withdrawPrivateKeyWif: undefined,
     withdrawSigningKeyInfo: undefined,
@@ -1316,7 +1319,6 @@ export function clearUsernameTransferFields(state: BridgeState): BridgeState {
     ...state,
     xferCredentialSource: undefined,
     xferMnemonic: undefined,
-    xferDiscovering: undefined,
     xferDiscoveryStatus: undefined,
     xferCredentialError: undefined,
     xferPrivateKeyWif: undefined,
@@ -1340,6 +1342,7 @@ export function setManageActionKeys(state: BridgeState): BridgeState {
   return {
     ...clearUsernameTransferFields(state),
     step: 'manage_enter_identity',
+    targetIdentityId: undefined,
   };
 }
 
@@ -1388,7 +1391,6 @@ export function setXferMnemonic(state: BridgeState, mnemonic: string): BridgeSta
 export function setXferDiscovering(state: BridgeState, status: string): BridgeState {
   return {
     ...state,
-    xferDiscovering: true,
     xferDiscoveryStatus: status,
     xferCredentialError: undefined,
   };
@@ -1410,7 +1412,6 @@ export function setXferDiscoveryStatus(state: BridgeState, status: string): Brid
 export function setXferCredentialError(state: BridgeState, error: string): BridgeState {
   return {
     ...state,
-    xferDiscovering: false,
     xferDiscoveryStatus: undefined,
     xferCredentialError: error,
   };
@@ -1434,7 +1435,6 @@ export function setXferIdentityUnlocked(
     ...state,
     step: 'xfer_select_username',
     targetIdentityId: params.identityId,
-    xferDiscovering: false,
     xferDiscoveryStatus: undefined,
     xferCredentialError: undefined,
     xferPrivateKeyWif: params.privateKeyWif,

@@ -1,7 +1,7 @@
 import type { BridgeState, KeyType, KeyPurpose, SecurityLevel, NetworkHealth } from '../types.js';
 import { getStepProgress, getStepDescription, ErrorCodes, ErrorCodeLabels } from './state.js';
 import { shouldShowContestedWarning, countUsernameStatuses } from '../platform/dpns-utils.js';
-import { MIN_TRANSFER_PROTOCOL_VERSION, isProtocolVersionSupported } from '../platform/username-transfer-utils.js';
+import { MIN_TRANSFER_PROTOCOL_VERSION, isProtocolVersionBlocked } from '../platform/username-transfer-utils.js';
 import { generateQRCodeDataUrl } from './qrcode.js';
 import { privateKeyToWif } from '../utils/wif.js';
 import { formatCreditsAsDash, formatCredits, MIN_WITHDRAWAL_CREDITS } from '../utils/credits.js';
@@ -2738,17 +2738,22 @@ function renderManageChooseActionStep(_state: BridgeState): HTMLElement {
  * discovers the identity) or an identity ID plus a private key.
  */
 function renderXferCredentialsStep(state: BridgeState): HTMLElement {
+  const source = state.xferCredentialSource ?? 'seed';
+
   const div = document.createElement('div');
   div.className = 'xfer-credentials-step';
-  div.id = 'xfer-key-upload-dropzone';
+  // Only a dropzone on the tab that actually shows the upload control —
+  // otherwise dropping a key file on the seed-phrase tab silently unlocks by a
+  // route the user cannot see.
+  if (source === 'key') {
+    div.id = 'xfer-key-upload-dropzone';
+  }
 
   const headline = document.createElement('h2');
   headline.className = 'xfer-headline';
   headline.textContent = 'Unlock Your Identity';
   div.appendChild(headline);
-
-  const source = state.xferCredentialSource ?? 'seed';
-  const isDiscovering = state.xferDiscovering === true;
+  const isDiscovering = state.xferDiscoveryStatus !== undefined;
 
   const tabs = document.createElement('div');
   tabs.className = 'xfer-source-tabs';
@@ -2812,7 +2817,7 @@ function renderXferCredentialsStep(state: BridgeState): HTMLElement {
   if (isDiscovering) {
     const status = document.createElement('p');
     status.className = 'identity-status loading';
-    status.textContent = state.xferDiscoveryStatus || 'Looking up your identity...';
+    status.textContent = state.xferDiscoveryStatus!;
     div.appendChild(status);
   } else if (state.xferCredentialError) {
     const error = document.createElement('p');
@@ -2870,7 +2875,7 @@ function renderXferSelectUsernameStep(state: BridgeState): HTMLElement {
   }
 
   const protocolVersion = state.xferProtocolVersion;
-  const protocolUnsupported = protocolVersion !== undefined && !isProtocolVersionSupported(protocolVersion);
+  const protocolUnsupported = isProtocolVersionBlocked(protocolVersion);
   if (protocolUnsupported) {
     const warning = document.createElement('div');
     warning.className = 'warning-box';
@@ -2889,13 +2894,12 @@ function renderXferSelectUsernameStep(state: BridgeState): HTMLElement {
     list.innerHTML = `<p class="input-hint">This identity does not own any usernames.</p>`;
   } else {
     list.innerHTML = usernames
-      .map((username, index) => `
+      .map((username) => `
         <label class="xfer-username-option">
           <input
             type="radio"
             name="xfer-username"
             class="xfer-username-radio"
-            id="xfer-username-radio-${index}"
             data-username="${escapeAttr(username)}"
             ${state.xferSelectedUsername === username ? 'checked' : ''}
           />
@@ -3094,10 +3098,22 @@ function renderXferCompleteStep(state: BridgeState): HTMLElement {
     const errorMsg = document.createElement('div');
     errorMsg.className = 'xfer-error-msg';
     errorMsg.innerHTML = `
-      <p>The username could not be transferred.</p>
+      <p>${result?.unconfirmed
+        ? 'The transfer failed, but we could not read the username back to confirm that.'
+        : 'The username could not be transferred.'}</p>
       <p class="error-detail">${escapeHtml(result?.error || 'Unknown error')}</p>
     `;
     div.appendChild(errorMsg);
+
+    if (result?.unconfirmed) {
+      const note = document.createElement('div');
+      note.className = 'warning-box';
+      note.innerHTML = `
+        <p><strong>Check before retrying.</strong></p>
+        <p>The transfer may still have gone through. Look the username up on the explorer first — if it already belongs to the destination, do not transfer again.</p>
+      `;
+      div.appendChild(note);
+    }
   }
 
   if (state.xferRecipientId) {

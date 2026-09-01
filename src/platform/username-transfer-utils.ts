@@ -41,11 +41,16 @@ export interface DerivedCandidateKey {
   privateKeyWif: string;
 }
 
-/** Result of matching derived candidates against an identity's keys. */
-export type SigningKeySelection =
+/** Anything that carries a WIF can be matched against an identity's keys. */
+export interface WifBearing {
+  privateKeyWif: string;
+}
+
+/** Result of matching candidate keys against an identity's keys. */
+export type SigningKeySelection<T extends WifBearing = DerivedCandidateKey> =
   | {
       status: 'ok';
-      candidate: DerivedCandidateKey;
+      candidate: T;
       keyId: number;
       purpose: number;
       securityLevel: number;
@@ -117,6 +122,14 @@ export function isProtocolVersionSupported(protocolVersion: number): boolean {
 }
 
 /**
+ * Whether a known protocol version rules transfers out. An unknown version
+ * (the read is best-effort) does not block — the network gets the final say.
+ */
+export function isProtocolVersionBlocked(protocolVersion: number | undefined): boolean {
+  return protocolVersion !== undefined && !isProtocolVersionSupported(protocolVersion);
+}
+
+/**
  * Derive the identity key candidates to probe for a seed phrase.
  *
  * Ordered cheapest-first: every key index under identity index 0 (which covers
@@ -163,13 +176,13 @@ export function deriveCandidateKeys(mnemonic: string, network: string): DerivedC
  * message, since the fix is to add a HIGH AUTHENTICATION key rather than to
  * find a different seed.
  */
-export function selectTransferSigningKey(
-  candidates: DerivedCandidateKey[],
+export function selectTransferSigningKey<T extends WifBearing>(
+  candidates: T[],
   identityKeys: IdentityPublicKeyInfo[],
   network: string
-): SigningKeySelection {
+): SigningKeySelection<T> {
   const enabledKeys = identityKeys.filter((key) => !key.isDisabled);
-  let ineligible: SigningKeySelection | undefined;
+  let ineligible: SigningKeySelection<T> | undefined;
 
   for (const candidate of candidates) {
     const match = findMatchingKeyIndex(candidate.privateKeyWif, enabledKeys, network);

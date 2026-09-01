@@ -71,7 +71,6 @@ export {
   setManageActionKeys,
   setManageActionTransfer,
   // Username transfer state functions
-  clearUsernameTransferFields,
   setXferCredentialSource,
   setXferMnemonic,
   setXferDiscovering,

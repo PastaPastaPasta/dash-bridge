@@ -5,6 +5,7 @@ import {
   deriveCandidateKeys,
   explainKeyIneligibility,
   isEligibleTransferKey,
+  isProtocolVersionBlocked,
   isProtocolVersionSupported,
   isValidIdentityId,
   isValidMnemonic,
@@ -87,6 +88,14 @@ describe('protocol version gate', () => {
     expect(isProtocolVersionSupported(12)).toBe(false);
     expect(isProtocolVersionSupported(13)).toBe(true);
     expect(isProtocolVersionSupported(14)).toBe(true);
+  });
+
+  it('does not block when the version could not be read', () => {
+    // The version read is best-effort; an unknown version must not lock the
+    // user out of a transfer the network would actually accept.
+    expect(isProtocolVersionBlocked(undefined)).toBe(false);
+    expect(isProtocolVersionBlocked(12)).toBe(true);
+    expect(isProtocolVersionBlocked(13)).toBe(false);
   });
 });
 
@@ -185,5 +194,30 @@ describe('signing key selection', () => {
     const keys = [keyRecordForWif(candidates[0].privateKeyWif, { id: 0 })];
     // findMatchingKeyIndex rejects on WIF network prefix mismatch.
     expect(selectTransferSigningKey(candidates, keys, 'mainnet')).toEqual({ status: 'no_match' });
+  });
+
+  // The identity-ID + WIF path feeds a bare {privateKeyWif} through the same
+  // selector, so it gets the same eligibility rules as the seed path.
+  it('accepts a bare WIF candidate, not just derived keys', () => {
+    const wif = candidates[3].privateKeyWif;
+    const keys = [keyRecordForWif(wif, { id: 4, securityLevel: 1 })];
+
+    const selection = selectTransferSigningKey([{ privateKeyWif: wif }], keys, 'testnet');
+    expect(selection.status).toBe('ok');
+    if (selection.status !== 'ok') return;
+    expect(selection.keyId).toBe(4);
+    expect(selection.candidate.privateKeyWif).toBe(wif);
+  });
+
+  it('rejects a bare MASTER WIF as ineligible rather than unmatched', () => {
+    const wif = candidates[3].privateKeyWif;
+    const keys = [keyRecordForWif(wif, { id: 0, securityLevel: 0 })];
+
+    expect(selectTransferSigningKey([{ privateKeyWif: wif }], keys, 'testnet')).toEqual({
+      status: 'ineligible',
+      keyId: 0,
+      purpose: 0,
+      securityLevel: 0,
+    });
   });
 });
