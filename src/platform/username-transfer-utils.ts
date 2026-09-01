@@ -1,5 +1,6 @@
 import { validateMnemonic } from '@scure/bip39';
 import { wordlist } from '@scure/bip39/wordlists/english.js';
+import { base58 } from '@scure/base';
 import { mnemonicToHDKey, deriveKeyAtPath, getIdentityKeyDerivationPath } from '../crypto/hd.js';
 import {
   findMatchingKeyIndex,
@@ -86,6 +87,25 @@ export function isValidMnemonic(input: string): boolean {
  */
 export function isValidIdentityId(identityId: string): boolean {
   return /^[1-9A-HJ-NP-Za-km-z]{43,44}$/.test(identityId.trim());
+}
+
+/**
+ * Stricter check: the string is Base58 *and* decodes to exactly 32 bytes.
+ *
+ * The length/charset test alone is not sufficient — "1" is Base58's zero digit,
+ * so a 44-character string of them decodes to 44 zero bytes and the SDK rejects
+ * it as `Invalid identity ID: byte length not 32 bytes`. Used for the transfer
+ * recipient, where sending to a bad ID would orphan the username, so it is
+ * worth catching locally instead of via a network round trip.
+ */
+export function isWellFormedIdentityId(identityId: string): boolean {
+  const trimmed = identityId.trim();
+  if (!isValidIdentityId(trimmed)) return false;
+  try {
+    return base58.decode(trimmed).length === 32;
+  } catch {
+    return false;
+  }
 }
 
 /**

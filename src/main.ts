@@ -170,6 +170,7 @@ import {
   isProtocolVersionBlocked,
   isValidIdentityId,
   isValidMnemonic,
+  isWellFormedIdentityId,
   normalizeMnemonic,
   selectTransferSigningKey,
   MIN_TRANSFER_PROTOCOL_VERSION,
@@ -1578,16 +1579,16 @@ function setupEventListeners(container: HTMLElement) {
   });
 
   // Destination identity input — verify on blur or paste
+  // Deliberately no 'input' listener: this app re-renders the whole tree on any
+  // state change, so updating state per keystroke tears the field out from
+  // under the user (and under any automation) mid-edit. Verify on blur/paste
+  // instead, matching the identity inputs in the DPNS and manage flows.
   const xferRecipientInput = container.querySelector('#xfer-recipient-input');
   if (xferRecipientInput) {
-    xferRecipientInput.addEventListener('input', (e) => {
-      const target = e.target as HTMLInputElement;
-      updateState(setXferRecipientId(state, target.value));
-    });
-
     const verifyRecipient = () => {
       const recipientId = (xferRecipientInput as HTMLInputElement).value.trim();
       if (!recipientId || state.xferRecipientChecking) return;
+      if (recipientId === state.xferRecipientId && state.xferRecipientVerified !== undefined) return;
       startXferRecipientCheck(recipientId);
     };
 
@@ -1601,6 +1602,17 @@ function setupEventListeners(container: HTMLElement) {
   const xferSelectContinueBtn = container.querySelector('#xfer-select-continue-btn');
   if (xferSelectContinueBtn) {
     xferSelectContinueBtn.addEventListener('click', () => {
+      const typed = (
+        container.querySelector<HTMLInputElement>('#xfer-recipient-input')?.value ?? ''
+      ).trim();
+
+      // The field may have been edited after the check without ever blurring —
+      // never carry a stale verification onto a different recipient.
+      if (typed && typed !== state.xferRecipientId) {
+        startXferRecipientCheck(typed);
+        return;
+      }
+
       if (state.xferSelectedUsername && state.xferRecipientVerified) {
         updateState(setXferReview(state));
       }
@@ -3594,8 +3606,13 @@ function startXferUnlock() {
  * mistyped ID would move the username to an identity nobody controls.
  */
 async function startXferRecipientCheck(recipientId: string) {
-  if (!isValidIdentityId(recipientId)) {
-    updateState(setXferRecipientError(state, 'Invalid identity ID format (expected 44 character Base58 string)'));
+  // Record what is being checked before validating: it invalidates any earlier
+  // verification, and keeps the typed value through the re-render (the field is
+  // uncontrolled between blurs).
+  updateState(setXferRecipientId(state, recipientId));
+
+  if (!isWellFormedIdentityId(recipientId)) {
+    updateState(setXferRecipientError(state, 'Invalid identity ID (expected a Base58 string decoding to 32 bytes)'));
     return;
   }
 

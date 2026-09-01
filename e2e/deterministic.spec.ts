@@ -108,7 +108,7 @@ test.describe('Deterministic UI E2E (mock mode)', () => {
     // Invalid identity ID is rejected
     await page.fill('#withdraw-identity-id-input', 'nope');
     await page.locator('#withdraw-identity-id-input').press('Tab');
-    await expect(page.getByText('Invalid identity ID format')).toBeVisible();
+    await expect(page.getByText(/Invalid identity ID/)).toBeVisible();
 
     // Valid identity advances to configure with the balance shown
     await page.fill('#withdraw-identity-id-input', E2E_MOCK_IDENTITY_ID);
@@ -212,7 +212,7 @@ test.describe('Deterministic UI E2E (mock mode)', () => {
     // A malformed destination is rejected without a network round trip.
     await page.fill('#xfer-recipient-input', 'not-an-identity');
     await page.locator('#xfer-recipient-input').blur();
-    await expect(page.getByText('Invalid identity ID format')).toBeVisible();
+    await expect(page.getByText(/Invalid identity ID/)).toBeVisible();
 
     // Transferring to yourself is a no-op the SDK would reject anyway.
     await page.fill('#xfer-recipient-input', E2E_MOCK_IDENTITY_ID);

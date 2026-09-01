@@ -9,6 +9,7 @@ import {
   isProtocolVersionSupported,
   isValidIdentityId,
   isValidMnemonic,
+  isWellFormedIdentityId,
   normalizeMnemonic,
   selectTransferSigningKey,
 } from './username-transfer-utils.js';
@@ -60,6 +61,30 @@ describe('identity ID validation', () => {
     expect(isValidIdentityId('1'.repeat(45))).toBe(false);
     // 0, O, I and l are not in the Base58 alphabet.
     expect(isValidIdentityId(`0${'1'.repeat(43)}`)).toBe(false);
+  });
+});
+
+describe('well-formed identity ID', () => {
+  // A real testnet identity: Base58 that decodes to exactly 32 bytes.
+  const REAL = '79KWAGD8C336Snx8u2C3f2U4XcyE1rdfhPE2qbocjkvg';
+
+  it('accepts an id that decodes to 32 bytes', () => {
+    expect(isWellFormedIdentityId(REAL)).toBe(true);
+    expect(isWellFormedIdentityId(`  ${REAL}  `)).toBe(true);
+  });
+
+  it('rejects Base58 of the right length that decodes to the wrong size', () => {
+    // "1" is Base58's zero digit, so 44 of them decode to 44 zero bytes, not 32.
+    // The loose charset check passes it; the SDK would reject it at the network.
+    const zeros = '1'.repeat(44);
+    expect(isValidIdentityId(zeros)).toBe(true);
+    expect(isWellFormedIdentityId(zeros)).toBe(false);
+  });
+
+  it('rejects malformed input', () => {
+    expect(isWellFormedIdentityId('')).toBe(false);
+    expect(isWellFormedIdentityId('not-base58-0OIl')).toBe(false);
+    expect(isWellFormedIdentityId(REAL.slice(0, 20))).toBe(false);
   });
 });
 
